@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { SupplierAvatar } from '../components/SupplierAvatar'
 import type { Category, Offer, Paginated } from '../types'
 
 export function OffersPage() {
@@ -101,7 +102,16 @@ export function OffersPage() {
                 <tr key={o.id} className="border-t">
                   <td className="px-4 py-3 font-medium">{o.offer_title}</td>
                   <td className="px-4 py-3 text-slate-600">{o.category?.name || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{o.supplier?.commercial_name || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <SupplierAvatar
+                        name={o.supplier?.commercial_name || '?'}
+                        url={o.supplier?.logo_url}
+                        size={28}
+                      />
+                      <span>{o.supplier?.commercial_name || '—'}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     {o.price_value} {o.currency}
                     <span className="text-slate-400"> / {o.price_basis}</span>

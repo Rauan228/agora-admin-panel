@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
+import { LogoUpload } from '../components/LogoUpload'
+import { SupplierPicker } from '../components/SupplierPicker'
 import type { Category, Dictionaries, Offer } from '../types'
-
-type SupplierOption = { id: number; commercial_name: string; is_active: boolean }
 
 export function OfferFormPage() {
   const { id } = useParams()
@@ -11,7 +11,6 @@ export function OfferFormPage() {
   const navigate = useNavigate()
 
   const [categories, setCategories] = useState<Category[]>([])
-  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [dicts, setDicts] = useState<Dictionaries | null>(null)
 
   const [categoryId, setCategoryId] = useState('')
@@ -47,12 +46,10 @@ export function OfferFormPage() {
   useEffect(() => {
     Promise.all([
       api<{ data: Category[] }>('/admin/meta/categories'),
-      api<{ data: SupplierOption[] }>('/admin/meta/suppliers'),
       api<Dictionaries>('/admin/meta/dictionaries'),
     ])
-      .then(([cats, sups, d]) => {
+      .then(([cats, d]) => {
         setCategories(cats.data)
-        setSuppliers(sups.data)
         setDicts(d)
         if (!isEdit && cats.data[0]) setCategoryId(String(cats.data[0].id))
         if (!isEdit && d.dictionaries.price_basis?.[0]) setPriceBasis(d.dictionaries.price_basis[0])
@@ -61,6 +58,7 @@ export function OfferFormPage() {
         if (!isEdit) setLoading(false)
       })
   }, [isEdit])
+
 
   useEffect(() => {
     if (!id) return
@@ -218,24 +216,14 @@ export function OfferFormPage() {
               </select>
             </label>
 
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">Поставщик *</span>
-              <select
-                required
+            <div className="md:col-span-2">
+              <SupplierPicker
                 value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2"
-              >
-                <option value="" disabled>
-                  Выберите…
-                </option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.commercial_name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={setSupplierId}
+                required
+              />
+            </div>
+
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Цена *</span>
@@ -401,13 +389,14 @@ export function OfferFormPage() {
             </label>
           </div>
 
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Фото</span>
-            {photoUrl && (
-              <img src={photoUrl} alt="" className="mb-2 h-20 w-20 rounded object-cover" />
-            )}
-            <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
-          </label>
+          <LogoUpload
+            label="Фото оффера"
+            existingUrl={photoUrl}
+            file={photo}
+            onFileChange={setPhoto}
+            hint="PNG, JPG или WebP · до 5 МБ · лучше горизонтальное 800–1200 px"
+          />
+
 
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Описание</span>

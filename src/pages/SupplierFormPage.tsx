@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
+import { LogoUpload } from '../components/LogoUpload'
 import type { Supplier } from '../types'
 
 const empty = {
@@ -24,6 +25,7 @@ export function SupplierFormPage() {
   const [form, setForm] = useState(empty)
   const [logo, setLogo] = useState<File | null>(null)
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [removeLogo, setRemoveLogo] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
@@ -47,9 +49,11 @@ export function SupplierFormPage() {
           is_active: s.is_active,
         })
         setLogoUrl(s.logo_url)
+        setRemoveLogo(false)
       })
       .finally(() => setLoading(false))
   }, [id])
+
 
   function setField(key: keyof typeof empty, value: string | boolean) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -77,12 +81,14 @@ export function SupplierFormPage() {
         .filter(Boolean)
         .forEach((c) => fd.append('cities[]', c))
       if (logo) fd.append('logo', logo)
+      if (isEdit && removeLogo && !logo) fd.append('remove_logo', '1')
 
       if (isEdit) {
         await api(`/admin/suppliers/${id}`, { method: 'POST', formData: fd })
       } else {
         await api('/admin/suppliers', { method: 'POST', formData: fd })
       }
+
       navigate('/suppliers')
     } catch (err) {
       if (err instanceof ApiError) setErrors(err.errors)
@@ -152,13 +158,21 @@ export function SupplierFormPage() {
           <span className="mt-1 block text-xs text-slate-500">Через запятую</span>
         </label>
 
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium">Логотип</span>
-          {logoUrl && (
-            <img src={logoUrl} alt="" className="mb-2 h-16 w-16 rounded object-contain" />
-          )}
-          <input type="file" accept="image/*" onChange={(e) => setLogo(e.target.files?.[0] || null)} />
-        </label>
+        <LogoUpload
+          label="Логотип поставщика"
+          existingUrl={logoUrl}
+          file={logo}
+          removed={removeLogo}
+          onFileChange={(f) => {
+            setLogo(f)
+            if (f) setRemoveLogo(false)
+          }}
+          onRemoveExisting={() => {
+            setLogo(null)
+            setRemoveLogo(true)
+          }}
+        />
+
 
         <label className="flex items-center gap-2 text-sm">
           <input

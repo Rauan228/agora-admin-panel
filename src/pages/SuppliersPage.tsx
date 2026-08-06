@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { SupplierAvatar } from '../components/SupplierAvatar'
 import type { Paginated, Supplier } from '../types'
 
 export function SuppliersPage() {
@@ -87,6 +88,7 @@ export function SuppliersPage() {
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
+                <th className="px-4 py-3 font-medium">Лого</th>
                 <th className="px-4 py-3 font-medium">Название</th>
                 <th className="px-4 py-3 font-medium">ИНН</th>
                 <th className="px-4 py-3 font-medium">Города</th>
@@ -97,6 +99,9 @@ export function SuppliersPage() {
             <tbody>
               {data.data.map((s) => (
                 <tr key={s.id} className="border-t">
+                  <td className="px-4 py-3">
+                    <SupplierAvatar name={s.commercial_name} url={s.logo_url} size={40} />
+                  </td>
                   <td className="px-4 py-3 font-medium">{s.commercial_name}</td>
                   <td className="px-4 py-3">{s.inn}</td>
                   <td className="px-4 py-3 text-slate-500">
@@ -127,7 +132,7 @@ export function SuppliersPage() {
               ))}
               {data.data.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     Пока нет поставщиков
                   </td>
                 </tr>

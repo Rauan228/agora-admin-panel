@@ -40,7 +40,12 @@ export type Offer = {
   id: number
   offer_title: string
   supplier_id: number
-  supplier?: { id: number; commercial_name: string }
+  supplier?: {
+    id: number
+    commercial_name: string
+    logo_url?: string | null
+    inn?: string | null
+  }
   category_id: number
   category?: { id: number; slug: string; name: string }
   price_value: number
