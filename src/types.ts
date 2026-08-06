@@ -25,7 +25,11 @@ export type CategoryField = {
   min?: number
   max?: number
   required?: boolean
+  version?: 'v1' | 'v1_optional' | 'v2' | string
+  hint?: string
+  filter?: boolean
 }
+
 
 export type Category = {
   id: number
@@ -39,6 +43,8 @@ export type Category = {
 export type Offer = {
   id: number
   offer_title: string
+  sku?: string | null
+  supplier_product_code?: string | null
   supplier_id: number
   supplier?: {
     id: number
@@ -49,9 +55,11 @@ export type Offer = {
   category_id: number
   category?: { id: number; slug: string; name: string }
   price_value: number
+  price_hidden?: boolean
   currency: string
   price_basis: string
   moq_value: number
+  order_step?: number
   stock_status: string
   production_lead_days: number | null
   delivery_lead_days: number | null
@@ -60,11 +68,13 @@ export type Offer = {
   payment_terms: string
   vat_rate: string
   branding_available: boolean
+  custom_manufacturing?: boolean
   photo_url: string | null
   description_short: string | null
   specs: Record<string, string | number | boolean>
   is_active: boolean
 }
+
 
 export type Paginated<T> = {
   data: T[]

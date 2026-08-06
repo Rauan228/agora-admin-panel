@@ -17,9 +17,13 @@ export function OfferFormPage() {
   const [supplierId, setSupplierId] = useState('')
   const [offerTitle, setOfferTitle] = useState('')
   const [priceValue, setPriceValue] = useState('')
+  const [priceHidden, setPriceHidden] = useState(false)
   const [currency, setCurrency] = useState('RUB')
   const [priceBasis, setPriceBasis] = useState('шт')
   const [moqValue, setMoqValue] = useState('1')
+  const [orderStep, setOrderStep] = useState('1')
+  const [sku, setSku] = useState('')
+  const [supplierProductCode, setSupplierProductCode] = useState('')
   const [stockStatus, setStockStatus] = useState('В наличии')
   const [productionLead, setProductionLead] = useState('')
   const [deliveryLead, setDeliveryLead] = useState('')
@@ -28,8 +32,10 @@ export function OfferFormPage() {
   const [paymentTerms, setPaymentTerms] = useState('Безнал')
   const [vatRate, setVatRate] = useState('20')
   const [branding, setBranding] = useState(false)
+  const [customMfg, setCustomMfg] = useState(false)
   const [description, setDescription] = useState('')
   const [isActive, setIsActive] = useState(true)
+
   const [specs, setSpecs] = useState<Record<string, string>>({})
   const [photo, setPhoto] = useState<File | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -68,10 +74,14 @@ export function OfferFormPage() {
         setCategoryId(String(o.category_id))
         setSupplierId(String(o.supplier_id))
         setOfferTitle(o.offer_title)
-        setPriceValue(String(o.price_value))
+        setPriceValue(String(o.price_value ?? ''))
+        setPriceHidden(Boolean(o.price_hidden))
         setCurrency(o.currency)
         setPriceBasis(o.price_basis)
         setMoqValue(String(o.moq_value))
+        setOrderStep(String(o.order_step ?? 1))
+        setSku(o.sku || '')
+        setSupplierProductCode(o.supplier_product_code || '')
         setStockStatus(o.stock_status)
         setProductionLead(o.production_lead_days != null ? String(o.production_lead_days) : '')
         setDeliveryLead(o.delivery_lead_days != null ? String(o.delivery_lead_days) : '')
@@ -80,8 +90,10 @@ export function OfferFormPage() {
         setPaymentTerms(o.payment_terms)
         setVatRate(o.vat_rate)
         setBranding(o.branding_available)
+        setCustomMfg(Boolean(o.custom_manufacturing))
         setDescription(o.description_short || '')
         setIsActive(o.is_active)
+
         setPhotoUrl(o.photo_url)
         const s: Record<string, string> = {}
         Object.entries(o.specs || {}).forEach(([k, v]) => {
@@ -111,10 +123,14 @@ export function OfferFormPage() {
       fd.append('category_id', categoryId)
       fd.append('supplier_id', supplierId)
       fd.append('offer_title', offerTitle)
-      fd.append('price_value', priceValue)
+      if (sku) fd.append('sku', sku)
+      if (supplierProductCode) fd.append('supplier_product_code', supplierProductCode)
+      fd.append('price_value', priceValue || '0.01')
+      fd.append('price_hidden', priceHidden ? '1' : '0')
       fd.append('currency', currency)
       fd.append('price_basis', priceBasis)
       fd.append('moq_value', moqValue)
+      fd.append('order_step', orderStep || '1')
       fd.append('stock_status', stockStatus)
       if (productionLead !== '') fd.append('production_lead_days', productionLead)
       if (deliveryLead !== '') fd.append('delivery_lead_days', deliveryLead)
@@ -123,9 +139,11 @@ export function OfferFormPage() {
       fd.append('payment_terms', paymentTerms)
       fd.append('vat_rate', vatRate)
       fd.append('branding_available', branding ? '1' : '0')
+      fd.append('custom_manufacturing', customMfg ? '1' : '0')
       fd.append('is_active', isActive ? '1' : '0')
       if (description) fd.append('description_short', description)
       if (photo) fd.append('photo', photo)
+
 
       // specs as nested FormData keys
       Object.entries(specs).forEach(([k, v]) => {
@@ -214,6 +232,9 @@ export function OfferFormPage() {
                   </option>
                 ))}
               </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                Полная схема полей сейчас доведена для «Гофрокороба». Остальные категории — базовая заготовка.
+              </span>
             </label>
 
             <div className="md:col-span-2">
@@ -224,19 +245,40 @@ export function OfferFormPage() {
               />
             </div>
 
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Артикул / SKU</span>
+              <input
+                value={sku}
+                onChange={(e) => setSku(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2"
+                placeholder="BOX-T23-400-300-200"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Код товара поставщика</span>
+              <input
+                value={supplierProductCode}
+                onChange={(e) => setSupplierProductCode(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2"
+                placeholder="GK-0201-01"
+              />
+            </label>
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Цена *</span>
               <input
-                required
+                required={!priceHidden}
                 type="number"
                 step="0.01"
                 min="0.01"
                 value={priceValue}
                 onChange={(e) => setPriceValue(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2"
+                disabled={priceHidden}
+                className="w-full rounded-lg border px-3 py-2 disabled:bg-slate-100"
               />
             </label>
+
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Валюта *</span>
@@ -279,6 +321,20 @@ export function OfferFormPage() {
                 className="w-full rounded-lg border px-3 py-2"
               />
             </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Шаг заказа *</span>
+              <input
+                required
+                type="number"
+                min={1}
+                value={orderStep}
+                onChange={(e) => setOrderStep(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2"
+              />
+              <span className="mt-1 block text-xs text-slate-500">Количество должно быть кратно шагу</span>
+            </label>
+
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Наличие *</span>
@@ -382,12 +438,29 @@ export function OfferFormPage() {
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
+                checked={customMfg}
+                onChange={(e) => setCustomMfg(e.target.checked)}
+              />
+              Изготовление под заказ
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={priceHidden}
+                onChange={(e) => setPriceHidden(e.target.checked)}
+              />
+              Цена скрыта
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
                 checked={isActive}
                 onChange={(e) => setIsActive(e.target.checked)}
               />
               Опубликован
             </label>
           </div>
+
 
           <LogoUpload
             label="Фото оффера"
@@ -414,17 +487,49 @@ export function OfferFormPage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
               Характеристики: {selectedCategory.name}
             </h2>
+            <p className="text-xs text-slate-500">
+              Зелёные поля — обязательные V1. Остальные — V1 optional (можно заполнять, не блокируют сохранение).
+            </p>
             <div className="grid gap-4 md:grid-cols-2">
               {selectedCategory.fields.map((field) => {
                 const options = field.dictionary ? d[field.dictionary] || [] : []
+                const ver =
+                  field.version === 'v1'
+                    ? 'V1'
+                    : field.version === 'v1_optional'
+                      ? 'opt'
+                      : field.version || ''
                 return (
                   <label key={field.key} className="block text-sm">
-                    <span className="mb-1 block font-medium">
-                      {field.label}
-                      {field.required ? ' *' : ''}
-                      {field.unit ? ` (${field.unit})` : ''}
+                    <span className="mb-1 flex flex-wrap items-center gap-2 font-medium">
+                      <span>
+                        {field.label}
+                        {field.required ? ' *' : ''}
+                        {field.unit ? ` (${field.unit})` : ''}
+                      </span>
+                      {ver && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                            field.required
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-amber-50 text-amber-800'
+                          }`}
+                        >
+                          {ver}
+                        </span>
+                      )}
                     </span>
-                    {field.type === 'enum' ? (
+                    {field.type === 'boolean' ? (
+                      <select
+                        value={specs[field.key] ?? ''}
+                        onChange={(e) => setSpec(field.key, e.target.value)}
+                        className="w-full rounded-lg border px-3 py-2"
+                      >
+                        <option value="">—</option>
+                        <option value="1">да</option>
+                        <option value="0">нет</option>
+                      </select>
+                    ) : field.type === 'enum' ? (
                       <select
                         required={field.required}
                         value={specs[field.key] || ''}
@@ -447,8 +552,12 @@ export function OfferFormPage() {
                         step="any"
                         value={specs[field.key] || ''}
                         onChange={(e) => setSpec(field.key, e.target.value)}
+                        placeholder={field.hint || ''}
                         className="w-full rounded-lg border px-3 py-2"
                       />
+                    )}
+                    {field.hint && field.type !== 'string' && (
+                      <span className="mt-1 block text-xs text-slate-500">{field.hint}</span>
                     )}
                   </label>
                 )
@@ -456,6 +565,7 @@ export function OfferFormPage() {
             </div>
           </section>
         )}
+
 
         <div className="flex gap-2 border-t pt-4">
           <button
