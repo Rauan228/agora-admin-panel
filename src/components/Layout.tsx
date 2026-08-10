@@ -22,7 +22,11 @@ export function Layout() {
               <NavLink to="/suppliers" className={linkClass}>
                 Поставщики
               </NavLink>
+              <NavLink to="/leads" className={linkClass}>
+                Лиды
+              </NavLink>
             </nav>
+
           </div>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-slate-500">{user?.email}</span>
