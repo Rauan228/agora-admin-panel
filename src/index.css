@@ -471,25 +471,56 @@ button:hover { cursor: pointer; }
   border-radius: 0.7rem;
   padding: 0.65rem 0.75rem;
 }
+.ai-understood-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
 .ai-understood-title {
   font-size: 0.72rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #1e40af;
-  margin-bottom: 0.45rem;
 }
+.ai-understood-count { font-size: 0.68rem; color: #64748b; }
 .ai-understood-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .ai-tag {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.3rem;
   background: #fff;
   border: 1px solid #bfdbfe;
   border-radius: 0.45rem;
-  padding: 0.22rem 0.5rem;
+  padding: 0.22rem 0.3rem 0.22rem 0.5rem;
   font-size: 0.75rem;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
 }
+/* Freshly added by the last turn — brief highlight so the user sees it landed. */
+.ai-tag-new {
+  border-color: #6ee7b7;
+  box-shadow: 0 0 0 2px rgba(110, 231, 183, 0.25);
+  animation: ai-tag-pop 0.35s ease-out;
+}
+.ai-tag-removing { opacity: 0.4; }
+@keyframes ai-tag-pop {
+  from { transform: scale(0.92); }
+  to { transform: scale(1); }
+}
+.ai-tag-x {
+  border: 0;
+  background: none;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.ai-tag-x:hover:not(:disabled) { color: #b91c1c; background: #fef2f2; }
+.ai-tag-x:disabled { opacity: 0.3; cursor: default; }
 .ai-tag-label { color: #64748b; font-size: 0.68rem; }
 .ai-tag-value { color: var(--ai-ink); font-weight: 550; }
 .ai-understood-hint { margin-top: 0.45rem; font-size: 0.7rem; color: #64748b; }

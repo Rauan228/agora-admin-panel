@@ -48,7 +48,22 @@ type ComparisonRow = {
   match_tier?: MatchTier
 }
 
-type Understood = { key: string; label: string; value: string }
+type Understood = {
+  key: string
+  label: string
+  value: string
+  /** Query keys to clear when this chip is removed. */
+  fields?: string[]
+  removable?: boolean
+}
+
+type TurnInfo = {
+  kind?: string | null
+  added_fields?: string[]
+  dropped_fields?: string[]
+  switched_from?: string[]
+  searched?: boolean
+}
 
 type CatalogStats = {
   active_offers: number
@@ -123,6 +138,7 @@ type MessageResponse = {
   suppliers: { id: number; commercial_name: string; logo_url?: string | null; best_match_score?: number }[]
   comparison: { dimensions: string[]; rows: ComparisonRow[] }
   suggested_replies: string[]
+  turn?: TurnInfo
   cta?: { type: string; label: string; prefill?: { brief?: string } }
   /** Admin-only — never on public storefront API */
   cost?: TurnCost
@@ -234,6 +250,8 @@ export function AiMatchPage() {
   const [turnHistory, setTurnHistory] = useState<
     { n: number; cost_usd: number; tokens: number; calls: number; estimated?: boolean }[]
   >([])
+  const [turn, setTurn] = useState<TurnInfo | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -301,15 +319,30 @@ export function AiMatchPage() {
     structured_query?: Record<string, unknown>
     intent_source?: string
     catalog_stats?: MatchStats
+    turn?: TurnInfo
     cost?: TurnCost
     session_cost?: SessionCost
   }) {
-    if (res.offers) setOffers(res.offers)
-    if (res.comparison?.rows) setComparison(res.comparison.rows)
-    if (res.understood) setUnderstood(res.understood)
+    // A conversational turn (greeting, meta question) ran no search — keep the
+    // shortlist on screen instead of blanking the panel.
+    const searched = res.turn?.searched !== false
+    const isReset = res.turn?.kind === 'reset'
+
+    // `understood` is authoritative even when empty — a reset clears the chips.
+    if (res.understood !== undefined) setUnderstood(res.understood)
+    if (searched || isReset) {
+      if (res.offers) setOffers(res.offers)
+      if (res.comparison?.rows) setComparison(res.comparison.rows)
+      if (isReset) {
+        setOffers([])
+        setComparison([])
+        setCompareIds([])
+      }
+    }
     if (res.structured_query) setQuery(res.structured_query)
     if (res.intent_source) setIntentSource(res.intent_source)
     if (res.catalog_stats) setMatchStats(res.catalog_stats)
+    if (res.turn) setTurn(res.turn)
     if (res.cost) {
       setLastTurnCost(res.cost)
       setTurnHistory((h) => [
@@ -486,6 +519,35 @@ export function AiMatchPage() {
       setStage(null)
       abortRef.current = null
       inputRef.current?.focus()
+    }
+  }
+
+  /**
+   * Removes a constraint chip. Deterministic server-side edit — no LLM call,
+   * so it feels instant and can't drift from what the chat believes.
+   */
+  async function removeConstraint(item: Understood) {
+    if (!sessionId || loading || removing) return
+    const fields = item.fields?.length ? item.fields : [item.key]
+    setRemoving(item.key)
+    setError(null)
+    try {
+      const res = await api<MessageResponse>(`${AI_BASE}/sessions/${sessionId}/refine`, {
+        method: 'POST',
+        json: { remove: fields },
+      })
+      applyResults(res as never)
+      setBrief(res.cta?.prefill?.brief || null)
+      if (res.suggested_replies?.length) setChips(res.suggested_replies)
+      setMessages((m) => [
+        ...m,
+        { id: `u-${Date.now()}`, role: 'user', content: `Убрать: ${item.label.toLowerCase()}` },
+        { id: `a-${Date.now()}`, role: 'assistant', content: res.assistant_message },
+      ])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить фильтр')
+    } finally {
+      setRemoving(null)
     }
   }
 
@@ -812,19 +874,49 @@ export function AiMatchPage() {
           </div>
 
           <div className="ai-results-scroll">
-            {/* What the AI understood — trust anchor */}
+            {/* Running context — the memory of the conversation, editable */}
             {understood.length > 0 ? (
               <div className="ai-understood">
-                <div className="ai-understood-title">Я понял задачу так</div>
-                <div className="ai-understood-tags">
-                  {understood.map((u) => (
-                    <span key={u.key} className="ai-tag">
-                      <span className="ai-tag-label">{u.label}</span>
-                      <span className="ai-tag-value">{u.value}</span>
-                    </span>
-                  ))}
+                <div className="ai-understood-head">
+                  <span className="ai-understood-title">Ищу с учётом</span>
+                  <span className="ai-understood-count">
+                    {understood.length} парам.
+                  </span>
                 </div>
-                <p className="ai-understood-hint">Не так? Напишите поправку — например «высота 250».</p>
+                <div className="ai-understood-tags">
+                  {understood.map((u) => {
+                    const justAdded = (turn?.added_fields ?? []).some((f) =>
+                      (u.fields ?? [u.key]).includes(f),
+                    )
+                    return (
+                      <span
+                        key={u.key}
+                        className={`ai-tag${justAdded ? ' ai-tag-new' : ''}${
+                          removing === u.key ? ' ai-tag-removing' : ''
+                        }`}
+                      >
+                        <span className="ai-tag-label">{u.label}</span>
+                        <span className="ai-tag-value">{u.value}</span>
+                        {u.removable !== false ? (
+                          <button
+                            type="button"
+                            className="ai-tag-x"
+                            title={`Убрать ${u.label.toLowerCase()} из запроса`}
+                            aria-label={`Убрать ${u.label}`}
+                            disabled={loading || removing !== null}
+                            onClick={() => void removeConstraint(u)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </span>
+                    )
+                  })}
+                </div>
+                <p className="ai-understood-hint">
+                  Помню контекст — дописывайте уточнения по ходу («нужен бурый», «высота 250»).
+                  Крестик снимает требование.
+                </p>
               </div>
             ) : null}
 
