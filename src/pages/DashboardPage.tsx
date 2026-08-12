@@ -162,6 +162,32 @@ function Bar({ value, max, tone = 'kraft' }: { value: number; max: number; tone?
   )
 }
 
+function Ring({ pct, label }: { pct: number; label: string }) {
+  const r = 22
+  const c = 2 * Math.PI * r
+  const dash = (Math.min(100, Math.max(0, pct)) / 100) * c
+  return (
+    <div className="dash-ring">
+      <svg viewBox="0 0 56 56" width="56" height="56" aria-hidden>
+        <circle cx="28" cy="28" r={r} fill="none" stroke="#efece6" strokeWidth="6" />
+        <circle
+          cx="28"
+          cy="28"
+          r={r}
+          fill="none"
+          stroke="#8a5a34"
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c - dash}`}
+          transform="rotate(-90 28 28)"
+        />
+      </svg>
+      <em>{pct}%</em>
+      <span>{label}</span>
+    </div>
+  )
+}
+
 export function DashboardPage() {
   const [days, setDays] = useState(30)
   const [data, setData] = useState<Dash | null>(null)
@@ -221,25 +247,13 @@ export function DashboardPage() {
         <div>
           <p className="dash-eyebrow">Agora Admin</p>
           <h1 className="dash-h1">Сводка</h1>
-          <p className="dash-sub">Каталог, поставщики и полный учёт ИИ-подбора — расходы, токены, сессии.</p>
+          <p className="dash-sub">
+            Живое состояние каталога и поставщиков. Период — только у ИИ, чтобы смотреть расход.
+          </p>
         </div>
-        <div className="dash-head-right">
-          <div className="dash-period">
-            {([7, 30, 90] as const).map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={days === d ? 'is-on' : ''}
-                onClick={() => setDays(d)}
-              >
-                {d} дн.
-              </button>
-            ))}
-          </div>
-          <button type="button" className="dash-refresh" onClick={() => void load(days)} disabled={loading}>
-            {loading ? 'Обновляю…' : 'Обновить'}
-          </button>
-        </div>
+        <button type="button" className="dash-refresh" onClick={() => void load(days)} disabled={loading}>
+          {loading ? 'Обновляю…' : 'Обновить'}
+        </button>
       </header>
 
       {err ? <div className="dash-banner dash-banner-err">{err}</div> : null}
@@ -262,40 +276,60 @@ export function DashboardPage() {
         </Link>
       </nav>
 
-      {/* Catalog */}
+      {/* Catalog — live DB snapshot, no period */}
       <section className="dash-sec">
         <div className="dash-sec-h">
-          <h2>Каталог</h2>
-          {cat?.is_thin ? <span className="dash-chip dash-chip-warn">мало офферов — ИИ ищет по узкому складу</span> : null}
+          <h2>Каталог сейчас</h2>
+          <span className="dash-chip">снимок базы · без периода</span>
+          {cat?.is_thin ? <span className="dash-chip dash-chip-warn">узкий склад для ИИ</span> : null}
         </div>
-        <div className="dash-kpis">
-          <article className="dash-kpi">
-            <span>Офферы активные</span>
-            <b>{cat ? num(cat.offers_active) : '—'}</b>
-            <small>всего {cat ? num(cat.offers_total) : '—'} · выкл. {cat ? num(cat.offers_inactive) : '—'}</small>
+
+        <div className="dash-live">
+          <article className="dash-hero">
+            <div className="dash-hero-num">
+              <span>Активные офферы</span>
+              <b>{cat ? num(cat.offers_active) : '—'}</b>
+            </div>
+            <div className="dash-rings">
+              <Ring
+                pct={cat && cat.offers_total ? Math.round((cat.offers_active / cat.offers_total) * 100) : 0}
+                label="вкл."
+              />
+              <Ring pct={cat?.completeness.pct_size ?? 0} label="размеры" />
+              <Ring pct={cat?.completeness.pct_photo ?? 0} label="фото" />
+            </div>
+            <p className="dash-hero-meta">
+              Всего в БД {cat ? num(cat.offers_total) : '—'} · выключено {cat ? num(cat.offers_inactive) : '—'} ·
+              в наличии {cat ? num(cat.offers_in_stock) : '—'} · цена скрыта {cat ? num(cat.offers_price_hidden) : '—'}
+            </p>
           </article>
-          <article className="dash-kpi">
-            <span>Поставщики активные</span>
-            <b>{cat ? num(cat.suppliers_active) : '—'}</b>
-            <small>всего {cat ? num(cat.suppliers_total) : '—'}</small>
-          </article>
-          <article className="dash-kpi">
-            <span>В наличии</span>
-            <b>{cat ? num(cat.offers_in_stock) : '—'}</b>
-            <small>цена скрыта: {cat ? num(cat.offers_price_hidden) : '—'}</small>
-          </article>
-          <article className="dash-kpi">
-            <span>С фото</span>
-            <b>{cat ? `${cat.completeness.pct_photo}%` : '—'}</b>
-            <small>
-              {cat ? `${cat.offers_with_photo} из ${cat.offers_total}` : '—'}
-            </small>
+          <article className="dash-hero dash-hero-sup">
+            <div className="dash-hero-num">
+              <span>Активные поставщики</span>
+              <b>{cat ? num(cat.suppliers_active) : '—'}</b>
+            </div>
+            <div className="dash-mix">
+              <div className="dash-mix-track">
+                <i
+                  style={{
+                    width: cat && cat.suppliers_total ? `${(cat.suppliers_active / cat.suppliers_total) * 100}%` : '0%',
+                  }}
+                />
+              </div>
+              <small>
+                {cat ? num(cat.suppliers_active) : 0} работают · {cat ? num(cat.suppliers_inactive) : 0} выкл. · всего{' '}
+                {cat ? num(cat.suppliers_total) : 0}
+              </small>
+            </div>
+            <Link to="/suppliers" className="dash-hero-link">
+              Открыть поставщиков →
+            </Link>
           </article>
         </div>
 
         <div className="dash-split">
           <div className="dash-panel">
-            <h3>Полнота активных карточек</h3>
+            <h3>Насколько карточки готовы к ИИ</h3>
             {cat ? (
               <ul className="dash-meters">
                 <li>
@@ -305,7 +339,7 @@ export function DashboardPage() {
                   </div>
                   <Bar value={cat.completeness.pct_size} max={100} />
                   <small>
-                    {cat.completeness.with_size} / {cat.completeness.sample}
+                    {cat.completeness.with_size} из {cat.completeness.sample} активных
                   </small>
                 </li>
                 <li>
@@ -314,13 +348,19 @@ export function DashboardPage() {
                     <b>{cat.completeness.pct_photo}%</b>
                   </div>
                   <Bar value={cat.completeness.pct_photo} max={100} />
+                  <small>
+                    {cat.completeness.with_photo} из {cat.completeness.sample}
+                  </small>
                 </li>
                 <li>
                   <div className="dash-meters-row">
-                    <span>Короткое описание</span>
+                    <span>Описание</span>
                     <b>{cat.completeness.pct_description}%</b>
                   </div>
                   <Bar value={cat.completeness.pct_description} max={100} />
+                  <small>
+                    {cat.completeness.with_description} из {cat.completeness.sample}
+                  </small>
                 </li>
               </ul>
             ) : (
@@ -328,29 +368,28 @@ export function DashboardPage() {
             )}
           </div>
           <div className="dash-panel">
-            <h3>Категории с товарами</h3>
+            <h3>Склад по категориям</h3>
             {cat && cat.categories.length > 0 ? (
-              <table className="dash-table">
-                <thead>
-                  <tr>
-                    <th>Категория</th>
-                    <th>Акт.</th>
-                    <th>Всего</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cat.categories.map((c) => (
-                    <tr key={c.id}>
-                      <td>{c.name}</td>
-                      <td>{c.active}</td>
-                      <td>{c.offers}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ul className="dash-cats">
+                {cat.categories.map((c) => {
+                  const max = Math.max(1, ...cat.categories.map((x) => x.active))
+                  return (
+                    <li key={c.id}>
+                      <div className="dash-cats-row">
+                        <span>{c.name}</span>
+                        <b>{c.active}</b>
+                      </div>
+                      <Bar value={c.active} max={max} />
+                    </li>
+                  )
+                })}
+              </ul>
             ) : (
               <p className="dash-empty">Пока нет офферов в категориях</p>
             )}
+            <Link to="/offers" className="dash-hero-link">
+              Открыть офферы →
+            </Link>
           </div>
         </div>
       </section>
@@ -358,8 +397,15 @@ export function DashboardPage() {
       {/* AI */}
       <section className="dash-sec">
         <div className="dash-sec-h">
-          <h2>ИИ-подбор · полная статистика</h2>
-          <span className="dash-chip">период {days} дн. · модель {data?.rates.model ?? '—'}</span>
+          <h2>ИИ-подбор · расход и активность</h2>
+          <div className="dash-period">
+            {([7, 30, 90] as const).map((d) => (
+              <button key={d} type="button" className={days === d ? 'is-on' : ''} onClick={() => setDays(d)}>
+                {d} дн.
+              </button>
+            ))}
+          </div>
+          <span className="dash-chip">модель {data?.rates.model ?? '—'}</span>
         </div>
 
         <div className="dash-kpis dash-kpis-money">

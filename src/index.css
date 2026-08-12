@@ -912,6 +912,31 @@ code {
 .dash-kpi small { color: #94a3b8; font-size: 0.75rem; }
 .dash-kpi-money { background: linear-gradient(180deg, #ecfdf5, #fff); border-color: #a7f3d0; }
 .dash-kpi-money b { color: #0f766e; }
+.dash-live { display: grid; gap: 0.75rem; margin-bottom: 0.85rem; }
+@media (min-width: 860px) { .dash-live { grid-template-columns: 1.4fr 1fr; } }
+.dash-hero {
+  background: #fff;
+  border: 1px solid #e8e4dc;
+  border-radius: 16px;
+  padding: 1.15rem 1.25rem 1.05rem;
+}
+.dash-hero-sup { background: linear-gradient(165deg, #faf7f3, #fff); }
+.dash-hero-num span { font-size: 0.75rem; color: #64748b; font-weight: 650; }
+.dash-hero-num b { display: block; font-size: 2.4rem; letter-spacing: -0.04em; line-height: 1.05; margin: 0.15rem 0 0.6rem; }
+.dash-rings { display: flex; gap: 1rem; flex-wrap: wrap; }
+.dash-ring { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; width: 4rem; }
+.dash-ring em { font-style: normal; font-size: 0.78rem; font-weight: 700; margin-top: -2.15rem; pointer-events: none; }
+.dash-ring span { font-size: 0.65rem; color: #94a3b8; text-align: center; margin-top: 1.15rem; }
+.dash-hero-meta { margin: 0.85rem 0 0; font-size: 0.8rem; color: #64748b; }
+.dash-mix { margin-top: 0.4rem; }
+.dash-mix-track { height: 10px; background: #efece6; border-radius: 99px; overflow: hidden; }
+.dash-mix-track i { display: block; height: 100%; background: #8a5a34; border-radius: 99px; }
+.dash-mix small { display: block; margin-top: 0.45rem; color: #64748b; font-size: 0.8rem; }
+.dash-hero-link { display: inline-block; margin-top: 0.85rem; font-size: 0.85rem; font-weight: 650; color: #8a5a34; }
+.dash-hero-link:hover { text-decoration: underline; }
+.dash-cats { list-style: none; margin: 0; padding: 0; }
+.dash-cats li { margin-bottom: 0.7rem; }
+.dash-cats-row { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.2rem; }
 .dash-split { display: grid; gap: 0.75rem; }
 @media (min-width: 860px) { .dash-split { grid-template-columns: 1fr 1fr; } }
 .dash-panel {
