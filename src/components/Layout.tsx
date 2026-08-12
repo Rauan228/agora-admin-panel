@@ -22,6 +22,9 @@ export function Layout() {
               <NavLink to="/suppliers" className={linkClass}>
                 Поставщики
               </NavLink>
+              <NavLink to="/ai" className={linkClass}>
+                AI-подбор
+              </NavLink>
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm">
@@ -36,7 +39,7 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main className="mx-auto max-w-6xl px-4 py-6 ai-main">
         <Outlet />
       </main>
     </div>

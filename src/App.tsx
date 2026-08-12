@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { AiMatchPage } from './pages/AiMatchPage'
 import { LoginPage } from './pages/LoginPage'
 import { OfferFormPage } from './pages/OfferFormPage'
 import { OffersPage } from './pages/OffersPage'
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/suppliers" element={<SuppliersPage />} />
             <Route path="/suppliers/new" element={<SupplierFormPage />} />
             <Route path="/suppliers/:id" element={<SupplierFormPage />} />
+            <Route path="/ai" element={<AiMatchPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/offers" replace />} />
         </Routes>
