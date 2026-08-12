@@ -163,26 +163,29 @@ function Bar({ value, max, tone = 'kraft' }: { value: number; max: number; tone?
 }
 
 function Ring({ pct, label }: { pct: number; label: string }) {
-  const r = 22
+  const r = 28
   const c = 2 * Math.PI * r
-  const dash = (Math.min(100, Math.max(0, pct)) / 100) * c
+  const clamped = Math.min(100, Math.max(0, pct))
+  const dash = (clamped / 100) * c
   return (
     <div className="dash-ring">
-      <svg viewBox="0 0 56 56" width="56" height="56" aria-hidden>
-        <circle cx="28" cy="28" r={r} fill="none" stroke="#efece6" strokeWidth="6" />
-        <circle
-          cx="28"
-          cy="28"
-          r={r}
-          fill="none"
-          stroke="#8a5a34"
-          strokeWidth="6"
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${c - dash}`}
-          transform="rotate(-90 28 28)"
-        />
-      </svg>
-      <em>{pct}%</em>
+      <div className="dash-ring-dial">
+        <svg viewBox="0 0 72 72" width="72" height="72" aria-hidden>
+          <circle cx="36" cy="36" r={r} fill="none" stroke="#efece6" strokeWidth="7" />
+          <circle
+            cx="36"
+            cy="36"
+            r={r}
+            fill="none"
+            stroke="#8a5a34"
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${c}`}
+            transform="rotate(-90 36 36)"
+          />
+        </svg>
+        <em>{clamped}%</em>
+      </div>
       <span>{label}</span>
     </div>
   )

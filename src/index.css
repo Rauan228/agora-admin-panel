@@ -923,10 +923,41 @@ code {
 .dash-hero-sup { background: linear-gradient(165deg, #faf7f3, #fff); }
 .dash-hero-num span { font-size: 0.75rem; color: #64748b; font-weight: 650; }
 .dash-hero-num b { display: block; font-size: 2.4rem; letter-spacing: -0.04em; line-height: 1.05; margin: 0.15rem 0 0.6rem; }
-.dash-rings { display: flex; gap: 1rem; flex-wrap: wrap; }
-.dash-ring { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; width: 4rem; }
-.dash-ring em { font-style: normal; font-size: 0.78rem; font-weight: 700; margin-top: -2.15rem; pointer-events: none; }
-.dash-ring span { font-size: 0.65rem; color: #94a3b8; text-align: center; margin-top: 1.15rem; }
+.dash-rings { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: flex-start; }
+.dash-ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 4.75rem;
+}
+.dash-ring-dial {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+.dash-ring-dial svg { display: block; }
+.dash-ring-dial em {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #16181d;
+  line-height: 1;
+}
+.dash-ring span {
+  font-size: 0.72rem;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.2;
+}
 .dash-hero-meta { margin: 0.85rem 0 0; font-size: 0.8rem; color: #64748b; }
 .dash-mix { margin-top: 0.4rem; }
 .dash-mix-track { height: 10px; background: #efece6; border-radius: 99px; overflow: hidden; }
