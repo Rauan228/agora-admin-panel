@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AiMatchPage } from './pages/AiMatchPage'
+import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { OfferFormPage } from './pages/OfferFormPage'
 import { OffersPage } from './pages/OffersPage'
@@ -22,7 +23,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/" element={<Navigate to="/offers" replace />} />
+            <Route path="/" element={<DashboardPage />} />
             <Route path="/offers" element={<OffersPage />} />
             <Route path="/offers/new" element={<OfferFormPage />} />
             <Route path="/offers/:id" element={<OfferFormPage />} />
@@ -31,7 +32,7 @@ export default function App() {
             <Route path="/suppliers/:id" element={<SupplierFormPage />} />
             <Route path="/ai" element={<AiMatchPage />} />
           </Route>
-          <Route path="*" element={<Navigate to="/offers" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
