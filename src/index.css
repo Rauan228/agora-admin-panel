@@ -709,3 +709,82 @@ code {
   border-radius: 0.25rem;
 }
 
+/* Admin cost meter (AI page only) */
+.ai-cost-pill {
+  font-size: 0.75rem;
+  color: #0f766e;
+  background: #ccfbf1;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  white-space: nowrap;
+}
+.ai-cost-muted { color: #0f766e; opacity: 0.85; font-weight: 400; }
+.ai-cost-panel {
+  margin-bottom: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #a7f3d0;
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 100%);
+}
+.ai-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+@media (min-width: 900px) {
+  .ai-cost-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.ai-cost-card {
+  background: #fff;
+  border: 1px solid #d1fae5;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.7rem;
+}
+.ai-cost-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+.ai-cost-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.ai-cost-value-sm { font-size: 0.95rem; }
+.ai-cost-sub {
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+.ai-cost-calls {
+  margin-top: 0.65rem;
+  font-size: 0.78rem;
+  color: #334155;
+}
+.ai-cost-calls ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+.ai-cost-calls li { margin: 0.15rem 0; }
+.ai-cost-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+.ai-cost-chip {
+  font-size: 0.68rem;
+  background: #fff;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+

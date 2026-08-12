@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { api, API_URL, ApiError } from '../api/client'
+import { api, API_URL, ApiError, getToken } from '../api/client'
 
 type ChatMsg = {
   id: string
@@ -69,11 +69,47 @@ type MatchStats = {
   sorted_by?: string
 }
 
+type CostCall = {
+  label: string
+  prompt_tokens: number
+  completion_tokens: number
+  cost_usd: number
+  estimated?: boolean
+  model?: string
+}
+
+type TurnCost = {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd: number
+  cost_rub_approx?: number
+  estimated?: boolean
+  llm_calls?: number
+  calls?: CostCall[]
+  match_search_usd?: number
+  match_search_note?: string
+  rates?: { input_per_mtok: number; output_per_mtok: number; usd_to_rub?: number }
+}
+
+type SessionCost = {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd: number
+  cost_rub_approx?: number
+  llm_calls: number
+  user_messages?: number
+  messages_with_llm?: number
+}
+
 type SessionCreate = {
   session_id: string
   welcome: string
   catalog?: CatalogStats
   suggested_replies: string[]
+  session_cost?: SessionCost
+  cost_rates?: { input_per_mtok: number; output_per_mtok: number; model?: string; usd_to_rub?: number }
 }
 
 type MessageResponse = {
@@ -88,7 +124,12 @@ type MessageResponse = {
   comparison: { dimensions: string[]; rows: ComparisonRow[] }
   suggested_replies: string[]
   cta?: { type: string; label: string; prefill?: { brief?: string } }
+  /** Admin-only — never on public storefront API */
+  cost?: TurnCost
+  session_cost?: SessionCost
 }
+
+const AI_BASE = '/admin/ai'
 
 /** Entry scenarios — always available, never overwritten by the model. */
 const SCENARIOS = [
@@ -116,6 +157,27 @@ const STAGE_LABELS: Record<string, string> = {
 function formatPrice(o: MatchedOffer): string {
   if (o.price_hidden || o.price_value == null) return 'цена по запросу'
   return `${o.price_value} ${o.currency}/${o.price_basis}`
+}
+
+function formatUsd(n: number | undefined | null): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  if (n === 0) return '$0'
+  if (n < 0.0001) return `$${n.toFixed(6)}`
+  if (n < 0.01) return `$${n.toFixed(5)}`
+  return `$${n.toFixed(4)}`
+}
+
+function formatRub(n: number | undefined | null): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  if (n < 0.01) return `≈ ${n.toFixed(3)} ₽`
+  return `≈ ${n.toFixed(2)} ₽`
+}
+
+function callLabel(label: string): string {
+  if (label === 'intent_parse') return 'Разбор запроса (intent)'
+  if (label === 'answer_compose') return 'Текст ответа'
+  if (label === 'answer_stream') return 'Текст ответа (stream)'
+  return label
 }
 
 function leadLabel(o: MatchedOffer): string | null {
@@ -161,6 +223,17 @@ export function AiMatchPage() {
   const [handoffNote, setHandoffNote] = useState('')
   const [handoffOk, setHandoffOk] = useState<string | null>(null)
   const [compareIds, setCompareIds] = useState<number[]>([])
+  const [lastTurnCost, setLastTurnCost] = useState<TurnCost | null>(null)
+  const [sessionCost, setSessionCost] = useState<SessionCost | null>(null)
+  const [costRates, setCostRates] = useState<{
+    input_per_mtok: number
+    output_per_mtok: number
+    model?: string
+    usd_to_rub?: number
+  } | null>(null)
+  const [turnHistory, setTurnHistory] = useState<
+    { n: number; cost_usd: number; tokens: number; calls: number; estimated?: boolean }[]
+  >([])
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -181,10 +254,16 @@ export function AiMatchPage() {
     setIntentSource(null)
     setCompareIds([])
     setStage(null)
+    setLastTurnCost(null)
+    setSessionCost(null)
+    setTurnHistory([])
     try {
-      const res = await api<SessionCreate>('/ai/sessions', { method: 'POST', json: {}, auth: false })
+      // Admin-only AI endpoints (cost meter). Public /api/ai/* has no cost fields.
+      const res = await api<SessionCreate>(`${AI_BASE}/sessions`, { method: 'POST', json: {} })
       setSessionId(res.session_id)
       setCatalog(res.catalog ?? null)
+      setSessionCost(res.session_cost ?? null)
+      if (res.cost_rates) setCostRates(res.cost_rates)
       setMessages([
         {
           id: 'welcome',
@@ -222,6 +301,8 @@ export function AiMatchPage() {
     structured_query?: Record<string, unknown>
     intent_source?: string
     catalog_stats?: MatchStats
+    cost?: TurnCost
+    session_cost?: SessionCost
   }) {
     if (res.offers) setOffers(res.offers)
     if (res.comparison?.rows) setComparison(res.comparison.rows)
@@ -229,6 +310,20 @@ export function AiMatchPage() {
     if (res.structured_query) setQuery(res.structured_query)
     if (res.intent_source) setIntentSource(res.intent_source)
     if (res.catalog_stats) setMatchStats(res.catalog_stats)
+    if (res.cost) {
+      setLastTurnCost(res.cost)
+      setTurnHistory((h) => [
+        ...h,
+        {
+          n: h.length + 1,
+          cost_usd: res.cost!.cost_usd,
+          tokens: res.cost!.total_tokens,
+          calls: res.cost!.llm_calls ?? res.cost!.calls?.length ?? 0,
+          estimated: res.cost!.estimated,
+        },
+      ])
+    }
+    if (res.session_cost) setSessionCost(res.session_cost)
   }
 
   /** Streams the reply; falls back to the blocking endpoint on any failure. */
@@ -238,9 +333,14 @@ export function AiMatchPage() {
 
     let res: Response
     try {
-      res = await fetch(`${API_URL}/api/ai/sessions/${sessionId}/stream`, {
+      const token = getToken()
+      res = await fetch(`${API_URL}/api${AI_BASE}/sessions/${sessionId}/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ message: msg }),
         signal: controller.signal,
       })
@@ -335,10 +435,9 @@ export function AiMatchPage() {
   }
 
   async function sendBlocking(msg: string, assistantId: string) {
-    const res = await api<MessageResponse>(`/ai/sessions/${sessionId}/messages`, {
+    const res = await api<MessageResponse>(`${AI_BASE}/sessions/${sessionId}/messages`, {
       method: 'POST',
       json: { message: msg },
-      auth: false,
     })
     applyResults(res as never)
     setBrief(res.cta?.prefill?.brief || null)
@@ -406,14 +505,14 @@ export function AiMatchPage() {
     if (!sessionId) return
     setError(null)
     try {
-      const res = await api<{ ok: boolean; brief?: string; status: string }>(
-        `/ai/sessions/${sessionId}/handoff`,
+      const res = await api<{ ok: boolean; brief?: string; status: string; session_cost?: SessionCost }>(
+        `${AI_BASE}/sessions/${sessionId}/handoff`,
         {
           method: 'POST',
           json: { contact: handoffContact || null, note: handoffNote || null },
-          auth: false,
         },
       )
+      if (res.session_cost) setSessionCost(res.session_cost)
       setHandoffOk('Заявка передана менеджеру — бриф сохранён в сессии.')
       if (res.brief) setBrief(res.brief)
       setHandoffOpen(false)
@@ -446,7 +545,7 @@ export function AiMatchPage() {
         <div>
           <h1 className="ai-h1">Подбор упаковки</h1>
           <p className="ai-sub">
-            Опишите задачу словами — подберу из каталога Agora и объясню выбор.
+            Admin-тест AI. Cost meter только здесь — на публичный API витрины не отдаётся.
           </p>
         </div>
         <div className="ai-head-actions">
@@ -456,11 +555,104 @@ export function AiMatchPage() {
               <strong>{catalog.active_suppliers}</strong> поставщиков
             </span>
           ) : null}
+          {sessionCost ? (
+            <span className="ai-cost-pill" title="Сумма LLM за текущую сессию">
+              сессия: <strong>{formatUsd(sessionCost.cost_usd)}</strong>
+              {sessionCost.cost_rub_approx != null ? (
+                <span className="ai-cost-muted"> ({formatRub(sessionCost.cost_rub_approx)})</span>
+              ) : null}
+            </span>
+          ) : null}
           <button type="button" onClick={() => void boot()} disabled={booting || loading} className="ai-btn-ghost">
             Новый запрос
           </button>
         </div>
       </header>
+
+      {/* Admin cost meter */}
+      {(lastTurnCost || sessionCost) && (
+        <div className="ai-cost-panel">
+          <div className="ai-cost-grid">
+            <div className="ai-cost-card">
+              <div className="ai-cost-label">Последний ответ</div>
+              <div className="ai-cost-value">{formatUsd(lastTurnCost?.cost_usd)}</div>
+              <div className="ai-cost-sub">
+                {lastTurnCost ? (
+                  <>
+                    {lastTurnCost.total_tokens} tok · in {lastTurnCost.prompt_tokens} / out{' '}
+                    {lastTurnCost.completion_tokens}
+                    {lastTurnCost.estimated ? ' · оценка' : ''}
+                    {lastTurnCost.cost_rub_approx != null
+                      ? ` · ${formatRub(lastTurnCost.cost_rub_approx)}`
+                      : ''}
+                  </>
+                ) : (
+                  'ещё не было LLM-вызовов'
+                )}
+              </div>
+            </div>
+            <div className="ai-cost-card">
+              <div className="ai-cost-label">Вся сессия</div>
+              <div className="ai-cost-value">{formatUsd(sessionCost?.cost_usd)}</div>
+              <div className="ai-cost-sub">
+                {sessionCost
+                  ? `${sessionCost.total_tokens} tok · ${sessionCost.llm_calls} LLM · ${sessionCost.user_messages ?? turnHistory.length} msg`
+                  : '—'}
+                {sessionCost?.cost_rub_approx != null
+                  ? ` · ${formatRub(sessionCost.cost_rub_approx)}`
+                  : ''}
+              </div>
+            </div>
+            <div className="ai-cost-card">
+              <div className="ai-cost-label">Поиск в каталоге</div>
+              <div className="ai-cost-value">$0</div>
+              <div className="ai-cost-sub">SQL scoring на VPS — без LLM</div>
+            </div>
+            <div className="ai-cost-card">
+              <div className="ai-cost-label">Тариф WaveSpeed</div>
+              <div className="ai-cost-value ai-cost-value-sm">
+                {costRates
+                  ? `$${costRates.input_per_mtok}/$${costRates.output_per_mtok}`
+                  : lastTurnCost?.rates
+                    ? `$${lastTurnCost.rates.input_per_mtok}/$${lastTurnCost.rates.output_per_mtok}`
+                    : '—'}
+              </div>
+              <div className="ai-cost-sub">
+                in/out за 1M tok
+                {costRates?.model ? ` · ${costRates.model}` : ''}
+              </div>
+            </div>
+          </div>
+          {lastTurnCost?.calls && lastTurnCost.calls.length > 0 ? (
+            <div className="ai-cost-calls">
+              <div className="ai-cost-label">Разбивка последнего ответа</div>
+              <ul>
+                {lastTurnCost.calls.map((c) => (
+                  <li key={c.label}>
+                    <strong>{callLabel(c.label)}</strong>
+                    {': '}
+                    {formatUsd(c.cost_usd)} · {c.prompt_tokens}+{c.completion_tokens} tok
+                    {c.estimated ? ' (оценка)' : ''}
+                  </li>
+                ))}
+                <li>
+                  <strong>Поиск офферов</strong>: $0 (детерминированный матч)
+                </li>
+              </ul>
+            </div>
+          ) : null}
+          {turnHistory.length > 1 ? (
+            <div className="ai-cost-history">
+              {turnHistory.map((t) => (
+                <span key={t.n} className="ai-cost-chip" title={`${t.tokens} tokens, ${t.calls} LLM`}>
+                  #{t.n} {formatUsd(t.cost_usd)}
+                  {t.estimated ? '~' : ''}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Honest banners */}
       {emptyCatalog ? (
