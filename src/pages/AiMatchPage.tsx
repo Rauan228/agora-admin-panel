@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { api, API_URL } from '../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { api, API_URL, ApiError } from '../api/client'
 
 type ChatMsg = {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  streaming?: boolean
 }
+
+type MatchTier = 'exact' | 'close' | 'weak' | 'fallback' | 'unknown'
 
 type MatchedOffer = {
   id: number
@@ -17,8 +20,12 @@ type MatchedOffer = {
   price_basis: string
   moq_value: number
   stock_status: string
+  production_lead_days?: number | null
+  delivery_lead_days?: number | null
   match_score?: number
+  match_tier?: MatchTier
   match_reasons?: string[]
+  match_gaps?: string[]
   photo_url?: string | null
   supplier?: { id: number; commercial_name: string; logo_url?: string | null }
   category?: { id: number; slug: string; name: string }
@@ -31,17 +38,41 @@ type ComparisonRow = {
   supplier?: string
   price: number | null
   currency: string
+  price_basis?: string
   moq: number
-  lead_days?: number
+  lead_days?: number | null
   box_type?: string | null
   size_mm?: string | null
   board_grade?: string | null
   match_score: number
+  match_tier?: MatchTier
+}
+
+type Understood = { key: string; label: string; value: string }
+
+type CatalogStats = {
+  active_offers: number
+  active_suppliers: number
+  categories?: Record<string, number>
+  is_thin?: boolean
+  llm_enabled?: boolean
+}
+
+type MatchStats = {
+  active_offers_total?: number
+  offers_in_requested_category?: number
+  scored_candidates?: number
+  returned?: number
+  relaxed?: string | null
+  exact_count?: number
+  top_score?: number
+  sorted_by?: string
 }
 
 type SessionCreate = {
   session_id: string
   welcome: string
+  catalog?: CatalogStats
   suggested_replies: string[]
 }
 
@@ -49,7 +80,9 @@ type MessageResponse = {
   session_id: string
   assistant_message: string
   structured_query: Record<string, unknown>
+  understood?: Understood[]
   intent_source?: string
+  catalog_stats?: MatchStats
   offers: MatchedOffer[]
   suppliers: { id: number; commercial_name: string; logo_url?: string | null; best_match_score?: number }[]
   comparison: { dimensions: string[]; rows: ComparisonRow[] }
@@ -57,27 +90,50 @@ type MessageResponse = {
   cta?: { type: string; label: string; prefill?: { brief?: string } }
 }
 
-const PRESETS = [
-  'Самосбор 400×300×200, бурый, Москва, 5000 шт',
-  'Гофрокороб 400x300x200 четырёхклапанный Т-23',
-  'Гофролист Т-23 оптом Москва',
-  'Стрейч плёнка 500 мм',
-  'Сравни топ-3',
-  'Покажи дешевле',
+/** Entry scenarios — always available, never overwritten by the model. */
+const SCENARIOS = [
+  { label: 'Короба для e-com', text: 'Нужны гофрокороба для отправок на маркетплейсы, Москва' },
+  { label: 'Самосбор 400×300×200', text: 'Самосборные короба 400×300×200 мм, бурые, 5000 шт/мес, Москва' },
+  { label: 'Гофролист оптом', text: 'Гофролист Т-23 оптом, Москва' },
+  { label: 'Срочно 1000 шт', text: 'Срочно нужно 1000 коробок в Москву, за 5 дней' },
+  { label: 'С печатью логотипа', text: 'Короба с печатью логотипа в 1 цвет, 3000 шт' },
 ]
 
+const TIER_META: Record<MatchTier, { label: string; className: string }> = {
+  exact: { label: 'точное совпадение', className: 'ai-tier ai-tier-exact' },
+  close: { label: 'близкий вариант', className: 'ai-tier ai-tier-close' },
+  weak: { label: 'слабое совпадение', className: 'ai-tier ai-tier-weak' },
+  fallback: { label: 'ближайшее из каталога', className: 'ai-tier ai-tier-weak' },
+  unknown: { label: '—', className: 'ai-tier ai-tier-weak' },
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  intent: 'Разбираю запрос',
+  match: 'Ищу в каталоге',
+  compose: 'Готовлю объяснение',
+}
+
 function formatPrice(o: MatchedOffer): string {
-  if (o.price_hidden || o.price_value == null) return 'по запросу'
+  if (o.price_hidden || o.price_value == null) return 'цена по запросу'
   return `${o.price_value} ${o.currency}/${o.price_basis}`
 }
 
+function leadLabel(o: MatchedOffer): string | null {
+  const lead = (o.production_lead_days ?? 0) + (o.delivery_lead_days ?? 0)
+  return lead > 0 ? `~${lead} дн.` : null
+}
+
+/** Minimal markdown: **bold**, _italic_, paragraphs. */
 function renderMdLite(text: string) {
-  // very light **bold** + newlines
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g)
   return parts.map((p, i) => {
-    if (p.startsWith('**') && p.endsWith('**')) {
-      return <strong key={i}>{p.slice(2, -2)}</strong>
-    }
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={i}>{p.slice(2, -2)}</strong>
+    if (p.startsWith('_') && p.endsWith('_') && p.length > 2)
+      return (
+        <em key={i} className="ai-muted-em">
+          {p.slice(1, -1)}
+        </em>
+      )
     return <span key={i}>{p}</span>
   })
 }
@@ -86,46 +142,49 @@ export function AiMatchPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [input, setInput] = useState('')
-  const [chips, setChips] = useState<string[]>(PRESETS)
+  const [chips, setChips] = useState<string[]>([])
   const [offers, setOffers] = useState<MatchedOffer[]>([])
   const [comparison, setComparison] = useState<ComparisonRow[]>([])
+  const [understood, setUnderstood] = useState<Understood[]>([])
   const [query, setQuery] = useState<Record<string, unknown> | null>(null)
+  const [matchStats, setMatchStats] = useState<MatchStats | null>(null)
+  const [catalog, setCatalog] = useState<CatalogStats | null>(null)
   const [intentSource, setIntentSource] = useState<string | null>(null)
   const [brief, setBrief] = useState<string | null>(null)
+  const [stage, setStage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [booting, setBooting] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showDebug, setShowDebug] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
   const [handoffContact, setHandoffContact] = useState('')
   const [handoffNote, setHandoffNote] = useState('')
   const [handoffOk, setHandoffOk] = useState<string | null>(null)
+  const [compareIds, setCompareIds] = useState<number[]>([])
+
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    boot()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
-
-  async function boot() {
+  const boot = useCallback(async () => {
+    abortRef.current?.abort()
     setBooting(true)
     setError(null)
     setHandoffOk(null)
+    setHandoffOpen(false)
     setOffers([])
     setComparison([])
+    setUnderstood([])
     setQuery(null)
+    setMatchStats(null)
     setBrief(null)
     setIntentSource(null)
+    setCompareIds([])
+    setStage(null)
     try {
-      const res = await api<SessionCreate>('/ai/sessions', {
-        method: 'POST',
-        json: {},
-        auth: false,
-      })
+      const res = await api<SessionCreate>('/ai/sessions', { method: 'POST', json: {}, auth: false })
       setSessionId(res.session_id)
+      setCatalog(res.catalog ?? null)
       setMessages([
         {
           id: 'welcome',
@@ -133,12 +192,160 @@ export function AiMatchPage() {
           content: res.welcome || 'Опишите задачу по упаковке — подберу офферы из каталога.',
         },
       ])
-      setChips(res.suggested_replies?.length ? res.suggested_replies : PRESETS)
+      setChips(res.suggested_replies ?? [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось создать AI-сессию')
+      setError(
+        e instanceof ApiError && e.status === 429
+          ? 'Слишком много запросов. Подождите минуту.'
+          : e instanceof Error
+            ? e.message
+            : 'Не удалось создать AI-сессию',
+      )
     } finally {
       setBooting(false)
     }
+  }, [])
+
+  useEffect(() => {
+    void boot()
+    return () => abortRef.current?.abort()
+  }, [boot])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  function applyResults(res: {
+    offers?: MatchedOffer[]
+    comparison?: { rows: ComparisonRow[] }
+    understood?: Understood[]
+    structured_query?: Record<string, unknown>
+    intent_source?: string
+    catalog_stats?: MatchStats
+  }) {
+    if (res.offers) setOffers(res.offers)
+    if (res.comparison?.rows) setComparison(res.comparison.rows)
+    if (res.understood) setUnderstood(res.understood)
+    if (res.structured_query) setQuery(res.structured_query)
+    if (res.intent_source) setIntentSource(res.intent_source)
+    if (res.catalog_stats) setMatchStats(res.catalog_stats)
+  }
+
+  /** Streams the reply; falls back to the blocking endpoint on any failure. */
+  async function sendStreaming(msg: string, assistantId: string): Promise<boolean> {
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    let res: Response
+    try {
+      res = await fetch(`${API_URL}/api/ai/sessions/${sessionId}/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({ message: msg }),
+        signal: controller.signal,
+      })
+    } catch {
+      return false
+    }
+
+    if (!res.ok || !res.body) return false
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let sawDelta = false
+    let finished = false
+
+    const handleFrame = (raw: string) => {
+      const lines = raw.split('\n')
+      let event = 'message'
+      let data = ''
+      for (const line of lines) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      }
+      if (!data) return
+      let payload: Record<string, unknown>
+      try {
+        payload = JSON.parse(data)
+      } catch {
+        return
+      }
+
+      if (event === 'stage') {
+        setStage(String(payload.stage ?? ''))
+      } else if (event === 'understood') {
+        applyResults(payload as never)
+      } else if (event === 'results') {
+        applyResults(payload as never)
+      } else if (event === 'delta') {
+        const text = String(payload.text ?? '')
+        const replace = payload.replace === true
+        sawDelta = true
+        setMessages((m) =>
+          m.map((x) =>
+            x.id === assistantId
+              ? { ...x, content: replace ? text : x.content + text, streaming: true }
+              : x,
+          ),
+        )
+      } else if (event === 'done') {
+        const final = payload as unknown as MessageResponse
+        applyResults(final as never)
+        setBrief(final.cta?.prefill?.brief || null)
+        if (final.suggested_replies?.length) setChips(final.suggested_replies)
+        setMessages((m) =>
+          m.map((x) =>
+            x.id === assistantId
+              ? { ...x, content: final.assistant_message || x.content, streaming: false }
+              : x,
+          ),
+        )
+        finished = true
+      } else if (event === 'error') {
+        throw new Error(String(payload.message ?? 'stream error'))
+      }
+    }
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let sep: number
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, sep)
+          buffer = buffer.slice(sep + 2)
+          handleFrame(frame)
+        }
+      }
+      if (buffer.trim()) handleFrame(buffer)
+    } catch (e) {
+      if (controller.signal.aborted) return true
+      // Partial stream is still useful — keep it rather than restarting.
+      if (sawDelta || finished) {
+        setMessages((m) => m.map((x) => (x.id === assistantId ? { ...x, streaming: false } : x)))
+        if (!finished) setError(e instanceof Error ? e.message : 'Поток прервался')
+        return true
+      }
+      return false
+    }
+
+    return finished || sawDelta
+  }
+
+  async function sendBlocking(msg: string, assistantId: string) {
+    const res = await api<MessageResponse>(`/ai/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      json: { message: msg },
+      auth: false,
+    })
+    applyResults(res as never)
+    setBrief(res.cta?.prefill?.brief || null)
+    if (res.suggested_replies?.length) setChips(res.suggested_replies)
+    setMessages((m) =>
+      m.map((x) => (x.id === assistantId ? { ...x, content: res.assistant_message, streaming: false } : x)),
+    )
   }
 
   async function send(text: string) {
@@ -147,36 +354,38 @@ export function AiMatchPage() {
     setError(null)
     setHandoffOk(null)
     setInput('')
-    setMessages((m) => [...m, { id: `u-${Date.now()}`, role: 'user', content: msg }])
     setLoading(true)
+    setStage('intent')
+
+    const assistantId = `a-${Date.now()}`
+    setMessages((m) => [
+      ...m,
+      { id: `u-${Date.now()}`, role: 'user', content: msg },
+      { id: assistantId, role: 'assistant', content: '', streaming: true },
+    ])
+
     try {
-      const res = await api<MessageResponse>(`/ai/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        json: { message: msg },
-        auth: false,
-      })
-      setMessages((m) => [
-        ...m,
-        { id: `a-${Date.now()}`, role: 'assistant', content: res.assistant_message },
-      ])
-      setOffers(res.offers || [])
-      setComparison(res.comparison?.rows || [])
-      setQuery(res.structured_query || null)
-      setIntentSource(res.intent_source || null)
-      setBrief(res.cta?.prefill?.brief || null)
-      if (res.suggested_replies?.length) setChips(res.suggested_replies)
+      const streamed = await sendStreaming(msg, assistantId)
+      if (!streamed) await sendBlocking(msg, assistantId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка AI-запроса')
-      setMessages((m) => [
-        ...m,
-        {
-          id: `e-${Date.now()}`,
-          role: 'system',
-          content: 'Не удалось получить ответ. Проверьте API и наличие офферов в каталоге.',
-        },
-      ])
+      const text =
+        e instanceof ApiError && e.status === 429
+          ? 'Слишком много запросов — подождите минуту.'
+          : e instanceof Error
+            ? e.message
+            : 'Ошибка AI-запроса'
+      setError(text)
+      setMessages((m) =>
+        m.map((x) =>
+          x.id === assistantId
+            ? { ...x, role: 'system', content: 'Не удалось получить ответ. Попробуйте ещё раз.', streaming: false }
+            : x,
+        ),
+      )
     } finally {
       setLoading(false)
+      setStage(null)
+      abortRef.current = null
       inputRef.current?.focus()
     }
   }
@@ -205,65 +414,100 @@ export function AiMatchPage() {
           auth: false,
         },
       )
-      setHandoffOk(`Статус: ${res.status}. Бриф сохранён в сессии.`)
+      setHandoffOk('Заявка передана менеджеру — бриф сохранён в сессии.')
       if (res.brief) setBrief(res.brief)
+      setHandoffOpen(false)
       setMessages((m) => [
         ...m,
-        {
-          id: `h-${Date.now()}`,
-          role: 'system',
-          content: 'Заявка передана менеджеру (handoff).',
-        },
+        { id: `h-${Date.now()}`, role: 'system', content: 'Заявка передана менеджеру вместе с брифом.' },
       ])
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Handoff failed')
+      setError(e instanceof Error ? e.message : 'Не удалось передать заявку')
     }
   }
 
+  function toggleCompare(id: number) {
+    setCompareIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+  }
+
+  const shownComparison = useMemo(
+    () => (compareIds.length >= 2 ? comparison.filter((r) => compareIds.includes(r.offer_id)) : comparison),
+    [comparison, compareIds],
+  )
+
+  const thinCatalog = catalog?.is_thin === true && (catalog?.active_offers ?? 0) > 0
+  const emptyCatalog = (catalog?.active_offers ?? 0) === 0
+  const relaxed = matchStats?.relaxed
+
   return (
     <div className="ai-page">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      {/* Header */}
+      <header className="ai-head">
         <div>
-          <h1 className="text-2xl font-semibold">AI-подбор (тест)</h1>
-          <p className="text-sm text-slate-500">
-            Каталог-заземлённый чат. API: <code className="text-xs">{API_URL}/api/ai/…</code>
-            {sessionId ? (
-              <>
-                {' '}
-                · session <code className="text-xs">{sessionId.slice(0, 8)}…</code>
-              </>
-            ) : null}
-            {intentSource ? <> · intent: <strong>{intentSource}</strong></> : null}
+          <h1 className="ai-h1">Подбор упаковки</h1>
+          <p className="ai-sub">
+            Опишите задачу словами — подберу из каталога Agora и объясню выбор.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void boot()}
-          disabled={booting || loading}
-          className="rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-60"
-        >
-          Новая сессия
-        </button>
-      </div>
+        <div className="ai-head-actions">
+          {catalog ? (
+            <span className="ai-catalog-pill" title="Область поиска — только активные офферы каталога">
+              каталог: <strong>{catalog.active_offers}</strong> офферов ·{' '}
+              <strong>{catalog.active_suppliers}</strong> поставщиков
+            </span>
+          ) : null}
+          <button type="button" onClick={() => void boot()} disabled={booting || loading} className="ai-btn-ghost">
+            Новый запрос
+          </button>
+        </div>
+      </header>
 
-      {error ? (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+      {/* Honest banners */}
+      {emptyCatalog ? (
+        <div className="ai-banner ai-banner-warn">
+          <strong>В каталоге нет активных офферов.</strong> Подбор ищет только по заведённым товарам,
+          поэтому сейчас результатов не будет. Добавьте поставщиков и офферы в админке.
+        </div>
+      ) : thinCatalog ? (
+        <div className="ai-banner ai-banner-info">
+          Каталог пока небольшой — <strong>{catalog?.active_offers}</strong> офферов. Если точного
+          совпадения не найдётся, покажу ближайшее и честно отмечу расхождения.
         </div>
       ) : null}
-      {handoffOk ? (
-        <div className="mb-4 rounded-lg border bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {handoffOk}
+
+      {catalog?.llm_enabled === false ? (
+        <div className="ai-banner ai-banner-info">
+          LLM отключён — работает разбор запроса на правилах. Матчинг и объяснения при этом
+          полноценные, только формулировки шаблонные.
         </div>
       ) : null}
+
+      {error ? <div className="ai-banner ai-banner-error">{error}</div> : null}
+      {handoffOk ? <div className="ai-banner ai-banner-ok">{handoffOk}</div> : null}
 
       <div className="ai-grid">
-        {/* Chat */}
-        <section className="ai-panel flex flex-col">
-          <div className="border-b px-4 py-3 text-sm font-semibold">Чат</div>
-          <div className="ai-chat-scroll flex-1 space-y-3 p-4">
+        {/* ---------------- Chat ---------------- */}
+        <section className="ai-panel ai-panel-chat">
+          <div className="ai-panel-head">
+            <span>Диалог</span>
+            {intentSource ? (
+              <button
+                type="button"
+                className="ai-link-btn"
+                onClick={() => setShowDebug((v) => !v)}
+                title="Технические детали разбора"
+              >
+                {showDebug ? 'скрыть детали' : 'детали'}
+              </button>
+            ) : null}
+          </div>
+
+          <div className="ai-chat-scroll">
             {booting ? (
-              <p className="text-sm text-slate-500">Создаём сессию…</p>
+              <div className="ai-skeleton-group">
+                <div className="ai-skeleton ai-skeleton-line" />
+                <div className="ai-skeleton ai-skeleton-line short" />
+              </div>
             ) : (
               messages.map((m) => (
                 <div
@@ -276,115 +520,247 @@ export function AiMatchPage() {
                         : 'ai-bubble ai-bubble-assistant'
                   }
                 >
-                  <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-400">
-                    {m.role === 'user' ? 'вы' : m.role === 'assistant' ? 'agora ai' : 'system'}
+                  <div className="ai-bubble-role">
+                    {m.role === 'user' ? 'Вы' : m.role === 'assistant' ? 'Agora AI' : 'Система'}
                   </div>
-                  <div className="text-sm whitespace-pre-wrap">{renderMdLite(m.content)}</div>
+                  <div className="ai-bubble-body">
+                    {m.content ? renderMdLite(m.content) : null}
+                    {m.streaming ? <span className="ai-caret" /> : null}
+                  </div>
                 </div>
               ))
             )}
-            {loading ? (
-              <div className="ai-bubble ai-bubble-assistant text-sm text-slate-500">Думаю…</div>
+
+            {loading && stage ? (
+              <div className="ai-stages">
+                {(['intent', 'match', 'compose'] as const).map((s, i) => {
+                  const order = ['intent', 'match', 'compose']
+                  const current = order.indexOf(stage)
+                  const state = i < current ? 'done' : i === current ? 'active' : 'idle'
+                  return (
+                    <span key={s} className={`ai-stage ai-stage-${state}`}>
+                      {state === 'done' ? '✓' : state === 'active' ? <span className="ai-dot" /> : '·'}{' '}
+                      {STAGE_LABELS[s]}
+                    </span>
+                  )
+                })}
+              </div>
             ) : null}
+
             <div ref={bottomRef} />
           </div>
 
-          <div className="border-t p-3">
-            <div className="mb-2 flex flex-wrap gap-1">
-              {chips.map((c) => (
+          {/* Composer */}
+          <div className="ai-composer">
+            {/* Scenario chips — persistent entry points */}
+            <div className="ai-chip-row">
+              {SCENARIOS.map((s) => (
                 <button
-                  key={c}
+                  key={s.label}
                   type="button"
                   disabled={loading || !sessionId}
-                  onClick={() => void send(c)}
-                  className="rounded-full border bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  onClick={() => void send(s.text)}
+                  className="ai-chip ai-chip-scenario"
+                  title={s.text}
                 >
-                  {c}
+                  {s.label}
                 </button>
               ))}
             </div>
-            <form onSubmit={onSubmit} className="flex gap-2">
+
+            {/* Model-suggested follow-ups */}
+            {chips.length > 0 ? (
+              <div className="ai-chip-row">
+                {chips.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    disabled={loading || !sessionId}
+                    onClick={() => void send(c)}
+                    className="ai-chip"
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <form onSubmit={onSubmit} className="ai-form">
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
                 rows={2}
-                placeholder="Опишите задачу… Enter — отправить, Shift+Enter — новая строка"
-                className="flex-1 resize-y rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
+                placeholder="Например: самосбор 400×300×200, бурый, 5000 шт/мес, Москва, с логотипом"
+                className="ai-input"
                 disabled={!sessionId || loading}
               />
-              <button
-                type="submit"
-                disabled={!sessionId || loading || !input.trim()}
-                className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
-              >
-                Отправить
+              <button type="submit" disabled={!sessionId || loading || !input.trim()} className="ai-btn-primary">
+                {loading ? '…' : 'Найти'}
               </button>
             </form>
+            <p className="ai-hint">Enter — отправить, Shift+Enter — новая строка</p>
           </div>
         </section>
 
-        {/* Results */}
-        <section className="ai-panel flex flex-col min-w-0">
-          <div className="border-b px-4 py-3 flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold">Shortlist ({offers.length})</span>
-            {offers.length > 0 ? (
-              <span className="text-xs text-slate-500">score ↓</span>
+        {/* ---------------- Results ---------------- */}
+        <section className="ai-panel ai-panel-results">
+          <div className="ai-panel-head">
+            <span>
+              Подборка{offers.length > 0 ? ` · ${offers.length}` : ''}
+            </span>
+            {matchStats?.sorted_by ? (
+              <span className="ai-panel-note">
+                сортировка: {matchStats.sorted_by === 'price' ? 'по цене' : matchStats.sorted_by === 'lead' ? 'по сроку' : 'по соответствию'}
+              </span>
+            ) : offers.length > 0 ? (
+              <span className="ai-panel-note">по соответствию запросу</span>
             ) : null}
           </div>
 
-          <div className="ai-chat-scroll flex-1 p-4 space-y-3">
-            {offers.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Здесь появятся офферы после сообщения. Попробуйте чип «Самосбор 400×300×200…».
-              </p>
-            ) : (
-              offers.map((o) => (
-                <article key={o.id} className="rounded-xl border bg-white p-3 shadow-sm">
-                  <div className="flex gap-3">
-                    <div className="ai-thumb shrink-0">
+          <div className="ai-results-scroll">
+            {/* What the AI understood — trust anchor */}
+            {understood.length > 0 ? (
+              <div className="ai-understood">
+                <div className="ai-understood-title">Я понял задачу так</div>
+                <div className="ai-understood-tags">
+                  {understood.map((u) => (
+                    <span key={u.key} className="ai-tag">
+                      <span className="ai-tag-label">{u.label}</span>
+                      <span className="ai-tag-value">{u.value}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="ai-understood-hint">Не так? Напишите поправку — например «высота 250».</p>
+              </div>
+            ) : null}
+
+            {relaxed === 'category' ? (
+              <div className="ai-banner ai-banner-info compact">
+                В запрошенной категории совпадений не было — расширил поиск на весь каталог.
+              </div>
+            ) : relaxed === 'all_criteria' ? (
+              <div className="ai-banner ai-banner-warn compact">
+                Точного совпадения нет. Ниже — ближайшее, что есть в каталоге, с отметками расхождений.
+              </div>
+            ) : null}
+
+            {/* Loading skeletons */}
+            {loading && offers.length === 0 ? (
+              <div className="ai-skeleton-group">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="ai-skeleton ai-skeleton-card" />
+                ))}
+              </div>
+            ) : null}
+
+            {/* Empty state */}
+            {!loading && offers.length === 0 ? (
+              <div className="ai-empty">
+                <p className="ai-empty-title">Пока ничего не подобрано</p>
+                <p className="ai-empty-text">
+                  {emptyCatalog
+                    ? 'В каталоге нет активных офферов — подбирать не из чего.'
+                    : 'Опишите задачу в диалоге или начните с готового сценария слева.'}
+                </p>
+              </div>
+            ) : null}
+
+            {/* Offer cards */}
+            {offers.map((o) => {
+              const tier = TIER_META[o.match_tier ?? 'unknown']
+              const lead = leadLabel(o)
+              const selected = compareIds.includes(o.id)
+              return (
+                <article key={o.id} className={`ai-card${selected ? ' ai-card-selected' : ''}`}>
+                  <div className="ai-card-top">
+                    <div className="ai-thumb">
                       {o.photo_url ? (
-                        <img src={o.photo_url} alt="" className="h-full w-full object-cover" />
+                        <img src={o.photo_url} alt="" loading="lazy" />
                       ) : (
-                        <span className="text-xs text-slate-400">no photo</span>
+                        <span className="ai-thumb-empty">нет фото</span>
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <h3 className="text-sm font-semibold leading-snug">{o.offer_title}</h3>
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                          {o.match_score ?? '—'}
-                        </span>
+
+                    <div className="ai-card-main">
+                      <div className="ai-card-titlerow">
+                        <h3 className="ai-card-title">{o.offer_title}</h3>
+                        <div className="ai-score-block">
+                          <span className="ai-score">{o.match_score ?? '—'}%</span>
+                          <span className={tier.className}>{tier.label}</span>
+                        </div>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">
+
+                      <p className="ai-card-meta">
                         {o.supplier?.commercial_name || 'Поставщик'}
                         {o.category ? ` · ${o.category.name}` : ''}
                         {o.sku ? ` · ${o.sku}` : ''}
                       </p>
-                      <p className="mt-1 text-sm">
+
+                      <p className="ai-card-terms">
                         <strong>{formatPrice(o)}</strong>
-                        <span className="text-slate-500"> · MOQ {o.moq_value}</span>
-                        <span className="text-slate-500"> · {o.stock_status}</span>
+                        <span className="ai-sep">·</span> MOQ {o.moq_value}
+                        <span className="ai-sep">·</span> {o.stock_status}
+                        {lead ? (
+                          <>
+                            <span className="ai-sep">·</span> {lead}
+                          </>
+                        ) : null}
                       </p>
-                      {o.match_reasons && o.match_reasons.length > 0 ? (
-                        <ul className="mt-2 text-xs text-slate-600 list-disc list-inside">
+                    </div>
+                  </div>
+
+                  {/* Why / gaps — the explainability payload */}
+                  {(o.match_reasons?.length || o.match_gaps?.length) ? (
+                    <div className="ai-why">
+                      {o.match_reasons?.length ? (
+                        <ul className="ai-why-list ai-why-good">
                           {o.match_reasons.slice(0, 4).map((r) => (
                             <li key={r}>{r}</li>
                           ))}
                         </ul>
                       ) : null}
+                      {o.match_gaps?.length ? (
+                        <ul className="ai-why-list ai-why-bad">
+                          {o.match_gaps.slice(0, 3).map((g) => (
+                            <li key={g}>{g}</li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
+                  ) : null}
+
+                  <div className="ai-card-actions">
+                    <button type="button" className="ai-btn-mini" onClick={() => toggleCompare(o.id)}>
+                      {selected ? '✓ в сравнении' : 'В сравнение'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ai-btn-mini"
+                      disabled={loading}
+                      onClick={() => void send(`Найди похожие на «${o.offer_title}», но дешевле`)}
+                    >
+                      Похожие дешевле
+                    </button>
                   </div>
                 </article>
-              ))
-            )}
+              )
+            })}
 
-            {comparison.length > 0 ? (
-              <div className="mt-2">
-                <h3 className="mb-2 text-sm font-semibold">Сравнение</h3>
-                <div className="overflow-x-auto rounded-lg border bg-white">
-                  <table className="ai-table text-xs">
+            {/* Comparison */}
+            {shownComparison.length > 1 ? (
+              <div className="ai-compare">
+                <div className="ai-compare-head">
+                  <h3>Сравнение{compareIds.length >= 2 ? ` (${shownComparison.length} выбрано)` : ''}</h3>
+                  {compareIds.length > 0 ? (
+                    <button type="button" className="ai-link-btn" onClick={() => setCompareIds([])}>
+                      сбросить выбор
+                    </button>
+                  ) : null}
+                </div>
+                <div className="ai-table-wrap">
+                  <table className="ai-table">
                     <thead>
                       <tr>
                         <th>Оффер</th>
@@ -394,25 +770,25 @@ export function AiMatchPage() {
                         <th>Размер</th>
                         <th>Тип</th>
                         <th>Марка</th>
-                        <th>Score</th>
+                        <th>Срок</th>
+                        <th>Матч</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {comparison.map((r) => (
+                      {shownComparison.map((r) => (
                         <tr key={r.offer_id}>
-                          <td className="max-w-[160px] truncate" title={r.title}>
+                          <td className="ai-td-title" title={r.title}>
                             {r.title}
                           </td>
                           <td>{r.supplier || '—'}</td>
-                          <td>
-                            {r.price == null ? 'запрос' : `${r.price} ${r.currency}`}
-                          </td>
+                          <td>{r.price == null ? 'по запросу' : `${r.price} ${r.currency}`}</td>
                           <td>{r.moq}</td>
                           <td>{r.size_mm || '—'}</td>
                           <td>{r.box_type || '—'}</td>
                           <td>{r.board_grade || '—'}</td>
+                          <td>{r.lead_days ? `${r.lead_days} дн.` : '—'}</td>
                           <td>
-                            <strong>{r.match_score}</strong>
+                            <strong>{r.match_score}%</strong>
                           </td>
                         </tr>
                       ))}
@@ -422,51 +798,84 @@ export function AiMatchPage() {
               </div>
             ) : null}
 
-            {query ? (
-              <details className="rounded-lg border bg-slate-50 p-3 text-xs">
-                <summary className="cursor-pointer font-semibold text-slate-700">
-                  StructuredQuery (debug)
-                </summary>
-                <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[11px] text-slate-600">
-                  {JSON.stringify(query, null, 2)}
-                </pre>
-              </details>
+            {/* Debug — opt-in only */}
+            {showDebug ? (
+              <div className="ai-debug">
+                <div className="ai-debug-row">
+                  <span>intent: <strong>{intentSource ?? '—'}</strong></span>
+                  {matchStats ? (
+                    <span>
+                      кандидатов: <strong>{matchStats.scored_candidates ?? 0}</strong> · точных:{' '}
+                      <strong>{matchStats.exact_count ?? 0}</strong>
+                    </span>
+                  ) : null}
+                  <span className="ai-debug-api">{API_URL}/api/ai/…</span>
+                </div>
+                {query ? <pre className="ai-debug-pre">{JSON.stringify(query, null, 2)}</pre> : null}
+              </div>
             ) : null}
+          </div>
 
-            {brief ? (
-              <details className="rounded-lg border bg-amber-50 p-3 text-xs" open>
-                <summary className="cursor-pointer font-semibold text-amber-800">
-                  Бриф для менеджера
-                </summary>
-                <pre className="mt-2 whitespace-pre-wrap text-amber-800">{brief}</pre>
-              </details>
-            ) : null}
-
-            <div className="rounded-xl border bg-white p-3">
-              <h3 className="mb-2 text-sm font-semibold">Handoff менеджеру</h3>
-              <div className="flex flex-col gap-2">
+          {/* Sticky CTA — always reachable */}
+          <div className="ai-cta-bar">
+            {handoffOpen ? (
+              <div className="ai-handoff">
+                <div className="ai-handoff-head">
+                  <strong>Заявка менеджеру</strong>
+                  <button type="button" className="ai-link-btn" onClick={() => setHandoffOpen(false)}>
+                    отмена
+                  </button>
+                </div>
                 <input
                   value={handoffContact}
                   onChange={(e) => setHandoffContact(e.target.value)}
-                  placeholder="Контакт (телефон / email)"
-                  className="rounded-lg border px-3 py-2 text-sm"
+                  placeholder="Телефон или email"
+                  className="ai-input-sm"
                 />
                 <input
                   value={handoffNote}
                   onChange={(e) => setHandoffNote(e.target.value)}
-                  placeholder="Заметка"
-                  className="rounded-lg border px-3 py-2 text-sm"
+                  placeholder="Комментарий (необязательно)"
+                  className="ai-input-sm"
                 />
+                {brief ? (
+                  <details className="ai-brief">
+                    <summary>Что уйдёт менеджеру</summary>
+                    <pre>{brief}</pre>
+                  </details>
+                ) : null}
+                <button type="button" onClick={() => void handoff()} className="ai-btn-primary full">
+                  Отправить заявку
+                </button>
+              </div>
+            ) : (
+              <div className="ai-cta-row">
                 <button
                   type="button"
-                  onClick={() => void handoff()}
-                  disabled={!sessionId || loading}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+                  className="ai-btn-primary"
+                  disabled={!sessionId}
+                  onClick={() => setHandoffOpen(true)}
                 >
                   Передать менеджеру
                 </button>
+                <button
+                  type="button"
+                  className="ai-btn-ghost"
+                  disabled={loading || offers.length < 2}
+                  onClick={() => void send('Сравни топ-3')}
+                >
+                  Сравнить топ-3
+                </button>
+                <button
+                  type="button"
+                  className="ai-btn-ghost"
+                  disabled={loading || offers.length < 2}
+                  onClick={() => void send('Покажи дешевле')}
+                >
+                  Дешевле
+                </button>
               </div>
-            </div>
+            )}
           </div>
         </section>
       </div>
