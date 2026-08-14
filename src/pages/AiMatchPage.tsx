@@ -185,6 +185,7 @@ type MessageResponse = {
 }
 
 const AI_BASE = '/admin/ai'
+const SESSION_KEY = 'agora_admin_ai_session'
 
 /** Entry scenarios — always available, never overwritten by the model. */
 const SCENARIOS = [
@@ -298,12 +299,7 @@ export function AiMatchPage() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  const boot = useCallback(async () => {
-    abortRef.current?.abort()
-    setBooting(true)
-    setError(null)
-    setHandoffOk(null)
-    setHandoffOpen(false)
+  const resetPanels = () => {
     setOffers([])
     setComparison([])
     setUnderstood([])
@@ -317,10 +313,45 @@ export function AiMatchPage() {
     setLastTurnCost(null)
     setSessionCost(null)
     setTurnHistory([])
+  }
+
+  const boot = useCallback(async (fresh = false) => {
+    abortRef.current?.abort()
+    setBooting(true)
+    setError(null)
+    setHandoffOk(null)
+    setHandoffOpen(false)
+    resetPanels()
     try {
+      const saved = !fresh ? window.localStorage.getItem(SESSION_KEY) : null
+      if (saved) {
+        try {
+          const restored = await api<MessageResponse & {
+            messages?: { id: number; role: ChatMsg['role']; content: string }[]
+            catalog?: CatalogStats
+            session_cost?: SessionCost
+          }>(`${AI_BASE}/sessions/${saved}`)
+          setSessionId(restored.session_id)
+          applyResults(restored)
+          if (restored.catalog) setCatalog(restored.catalog)
+          if (restored.session_cost) setSessionCost(restored.session_cost)
+          const hist = (restored.messages ?? []).filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+          setMessages(
+            hist.length
+              ? hist.map((m) => ({ id: String(m.id), role: m.role, content: m.content }))
+              : [{ id: 'welcome', role: 'assistant', content: 'Продолжаем этот подбор. Можно уточнять запрос.' }],
+          )
+          if (restored.suggested_replies?.length) setChips(restored.suggested_replies)
+          return
+        } catch {
+          window.localStorage.removeItem(SESSION_KEY)
+        }
+      }
+
       // Admin-only AI endpoints (cost meter). Public /api/ai/* has no cost fields.
       const res = await api<SessionCreate>(`${AI_BASE}/sessions`, { method: 'POST', json: {} })
       setSessionId(res.session_id)
+      window.localStorage.setItem(SESSION_KEY, res.session_id)
       setCatalog(res.catalog ?? null)
       setSessionCost(res.session_cost ?? null)
       if (res.cost_rates) setCostRates(res.cost_rates)
@@ -670,7 +701,7 @@ export function AiMatchPage() {
               ) : null}
             </span>
           ) : null}
-          <button type="button" onClick={() => void boot()} disabled={booting || loading} className="ai-btn-ghost">
+          <button type="button" onClick={() => void boot(true)} disabled={booting || loading} className="ai-btn-ghost">
             Новый запрос
           </button>
         </div>
