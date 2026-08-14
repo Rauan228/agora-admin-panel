@@ -143,12 +143,24 @@ type Bundle = {
   lines: BundleLine[]
 }
 
+type OrderPack = {
+  rfq_count: number
+  kind?: string
+  all_solid?: boolean
+  label?: string | null
+  reason?: string | null
+  min_score?: number | null
+  groups: Bundle[]
+  uncovered?: string[]
+}
+
 type OrderPlan = {
   multi: boolean
   needed?: number
   full_cover_count?: number
   recommended?: Bundle | null
   bundles?: Bundle[]
+  pack?: OrderPack | null
   split?: {
     supplier_count: number
     extra_rfqs: number
@@ -998,7 +1010,50 @@ export function AiMatchPage() {
               </div>
             ) : null}
 
-            {orderPlan?.multi && orderPlan.recommended?.kind === 'full_cover' ? (
+            {orderPlan?.multi && (orderPlan.pack?.rfq_count ?? 0) >= 2 ? (
+              <article className="ai-bundle ai-bundle-pack">
+                <div className="ai-bundle-head">
+                  <span className="ai-bundle-badge ai-bundle-badge-pack">
+                    {orderPlan.pack!.rfq_count} заявки
+                  </span>
+                  <div className="ai-bundle-titleblock">
+                    <h3 className="ai-bundle-title">{orderPlan.pack!.label || 'Сборка комплекта'}</h3>
+                    <p className="ai-bundle-sub">
+                      вместо {orderPlan.needed} отдельных · мин. {orderPlan.pack!.min_score ?? '—'}%
+                      {orderPlan.pack!.all_solid ? '' : ' · есть слабая линия'}
+                    </p>
+                  </div>
+                </div>
+                <p className="ai-bundle-reason">{orderPlan.pack!.reason}</p>
+                {orderPlan.pack!.groups.map((g) => (
+                  <div key={g.supplier_id} className="ai-pack-group">
+                    <div className="ai-pack-group-head">
+                      <strong>{g.supplier_name}</strong>
+                      <span>
+                        {g.covers} поз. · мин. {g.min_score}%
+                      </span>
+                    </div>
+                    <div className="ai-bundle-lines">
+                      {g.lines.map((line) => (
+                        <div key={line.slug} className={`ai-bundle-line${line.covered ? '' : ' is-gap'}`}>
+                          <div className="ai-bundle-line-cat">{line.name}</div>
+                          {line.offer ? (
+                            <>
+                              <div className="ai-bundle-line-title">{line.offer.offer_title}</div>
+                              <div className="ai-bundle-line-meta">
+                                {formatPrice(line.offer)} · {line.offer.match_score}%
+                              </div>
+                            </>
+                          ) : (
+                            <div className="ai-bundle-line-title">нет оффера</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </article>
+            ) : orderPlan?.multi && orderPlan.recommended?.kind === 'full_cover' ? (
               <article className="ai-bundle">
                 <div className="ai-bundle-head">
                   <span className="ai-bundle-badge">Одна заявка</span>
@@ -1272,9 +1327,11 @@ export function AiMatchPage() {
                   disabled={!sessionId}
                   onClick={() => setHandoffOpen(true)}
                 >
-                  {orderPlan?.recommended?.kind === 'full_cover'
-                    ? `Одна заявка · ${orderPlan.recommended.supplier_name}`
-                    : 'Передать менеджеру'}
+                  {(orderPlan?.pack?.rfq_count ?? 0) >= 2
+                    ? `${orderPlan!.pack!.rfq_count} заявки · ${orderPlan!.pack!.groups.map((g) => g.supplier_name).join(' + ')}`
+                    : orderPlan?.recommended?.kind === 'full_cover'
+                      ? `Одна заявка · ${orderPlan.recommended.supplier_name}`
+                      : 'Передать менеджеру'}
                 </button>
                 <button
                   type="button"
