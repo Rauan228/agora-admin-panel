@@ -60,9 +60,8 @@ type AiBlock = {
     period: number
     today: number
     last_7_days: number
-    by_status: { active: number; handed_off: number; closed: number }
+    by_status: { active: number; closed: number }
   }
-  handoffs: { period: number; all_time: number }
   messages: {
     period_total: number
     period_user: number
@@ -112,8 +111,6 @@ type LedgerRow = {
   id: string
   status: string
   created_at: string | null
-  handed_off_at: string | null
-  handoff_contact: string | null
   messages_count: number
   tokens_in: number
   tokens_out: number
@@ -463,11 +460,6 @@ export function DashboardPage() {
             <small>за всё время {ai ? num(ai.llm_calls.all_time) : '—'}</small>
           </article>
           <article className="dash-kpi">
-            <span>Handoff менеджеру</span>
-            <b>{ai ? num(ai.handoffs.period) : '—'}</b>
-            <small>всего {ai ? num(ai.handoffs.all_time) : '—'}</small>
-          </article>
-          <article className="dash-kpi">
             <span>Поиск в каталоге</span>
             <b>$0</b>
             <small>SQL scoring, без модели</small>
@@ -481,9 +473,6 @@ export function DashboardPage() {
               <ul className="dash-status">
                 <li>
                   <i className="dot dot-on" /> Активные <b>{ai.sessions.by_status.active}</b>
-                </li>
-                <li>
-                  <i className="dot dot-go" /> Переданы менеджеру <b>{ai.sessions.by_status.handed_off}</b>
                 </li>
                 <li>
                   <i className="dot" /> Закрыты <b>{ai.sessions.by_status.closed}</b>
@@ -559,14 +548,14 @@ export function DashboardPage() {
         <div className="dash-sec-h">
           <h2>Журнал сессий ИИ</h2>
           <div className="dash-period">
-            {['', 'active', 'handed_off', 'closed'].map((s) => (
+            {['', 'active', 'closed'].map((s) => (
               <button
                 key={s || 'all'}
                 type="button"
                 className={ledgerStatus === s ? 'is-on' : ''}
                 onClick={() => setLedgerStatus(s)}
               >
-                {s === '' ? 'все' : s === 'handed_off' ? 'handoff' : s}
+                {s === '' ? 'все' : s}
               </button>
             ))}
           </div>

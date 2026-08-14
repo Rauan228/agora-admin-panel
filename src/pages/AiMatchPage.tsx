@@ -190,7 +190,6 @@ type MessageResponse = {
   comparison: { dimensions: string[]; rows: ComparisonRow[] }
   suggested_replies: string[]
   turn?: TurnInfo
-  cta?: { type: string; label: string; prefill?: { brief?: string } }
   /** Admin-only — never on public storefront API */
   cost?: TurnCost
   session_cost?: SessionCost
@@ -283,16 +282,11 @@ export function AiMatchPage() {
   const [matchStats, setMatchStats] = useState<MatchStats | null>(null)
   const [catalog, setCatalog] = useState<CatalogStats | null>(null)
   const [intentSource, setIntentSource] = useState<string | null>(null)
-  const [brief, setBrief] = useState<string | null>(null)
   const [stage, setStage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [booting, setBooting] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
-  const [handoffOpen, setHandoffOpen] = useState(false)
-  const [handoffContact, setHandoffContact] = useState('')
-  const [handoffNote, setHandoffNote] = useState('')
-  const [handoffOk, setHandoffOk] = useState<string | null>(null)
   const [compareIds, setCompareIds] = useState<number[]>([])
   const [lastTurnCost, setLastTurnCost] = useState<TurnCost | null>(null)
   const [sessionCost, setSessionCost] = useState<SessionCost | null>(null)
@@ -319,7 +313,6 @@ export function AiMatchPage() {
     setOrderPlan(null)
     setQuery(null)
     setMatchStats(null)
-    setBrief(null)
     setIntentSource(null)
     setCompareIds([])
     setStage(null)
@@ -332,8 +325,6 @@ export function AiMatchPage() {
     abortRef.current?.abort()
     setBooting(true)
     setError(null)
-    setHandoffOk(null)
-    setHandoffOpen(false)
     resetPanels()
     try {
       const saved = !fresh ? window.localStorage.getItem(SESSION_KEY) : null
@@ -519,7 +510,6 @@ export function AiMatchPage() {
       } else if (event === 'done') {
         const final = payload as unknown as MessageResponse
         applyResults(final as never)
-        setBrief(final.cta?.prefill?.brief || null)
         if (final.suggested_replies?.length) setChips(final.suggested_replies)
         setMessages((m) =>
           m.map((x) =>
@@ -567,7 +557,6 @@ export function AiMatchPage() {
       json: { message: msg },
     })
     applyResults(res as never)
-    setBrief(res.cta?.prefill?.brief || null)
     if (res.suggested_replies?.length) setChips(res.suggested_replies)
     setMessages((m) =>
       m.map((x) => (x.id === assistantId ? { ...x, content: res.assistant_message, streaming: false } : x)),
@@ -578,7 +567,6 @@ export function AiMatchPage() {
     const msg = text.trim()
     if (!msg || !sessionId || loading) return
     setError(null)
-    setHandoffOk(null)
     setInput('')
     setLoading(true)
     setStage('intent')
@@ -631,7 +619,6 @@ export function AiMatchPage() {
         json: { remove: fields },
       })
       applyResults(res as never)
-      setBrief(res.cta?.prefill?.brief || null)
       if (res.suggested_replies?.length) setChips(res.suggested_replies)
       setMessages((m) => [
         ...m,
@@ -654,30 +641,6 @@ export function AiMatchPage() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void send(input)
-    }
-  }
-
-  async function handoff() {
-    if (!sessionId) return
-    setError(null)
-    try {
-      const res = await api<{ ok: boolean; brief?: string; status: string; session_cost?: SessionCost }>(
-        `${AI_BASE}/sessions/${sessionId}/handoff`,
-        {
-          method: 'POST',
-          json: { contact: handoffContact || null, note: handoffNote || null },
-        },
-      )
-      if (res.session_cost) setSessionCost(res.session_cost)
-      setHandoffOk('Заявка передана менеджеру — бриф сохранён в сессии.')
-      if (res.brief) setBrief(res.brief)
-      setHandoffOpen(false)
-      setMessages((m) => [
-        ...m,
-        { id: `h-${Date.now()}`, role: 'system', content: 'Заявка передана менеджеру вместе с брифом.' },
-      ])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось передать заявку')
     }
   }
 
@@ -831,7 +794,6 @@ export function AiMatchPage() {
       ) : null}
 
       {error ? <div className="ai-banner ai-banner-error">{error}</div> : null}
-      {handoffOk ? <div className="ai-banner ai-banner-ok">{handoffOk}</div> : null}
 
       <div className="ai-grid">
         {/* ---------------- Chat ---------------- */}
@@ -1295,68 +1257,24 @@ export function AiMatchPage() {
 
           {/* Sticky CTA — always reachable */}
           <div className="ai-cta-bar">
-            {handoffOpen ? (
-              <div className="ai-handoff">
-                <div className="ai-handoff-head">
-                  <strong>Заявка менеджеру</strong>
-                  <button type="button" className="ai-link-btn" onClick={() => setHandoffOpen(false)}>
-                    отмена
-                  </button>
-                </div>
-                <input
-                  value={handoffContact}
-                  onChange={(e) => setHandoffContact(e.target.value)}
-                  placeholder="Телефон или email"
-                  className="ai-input-sm"
-                />
-                <input
-                  value={handoffNote}
-                  onChange={(e) => setHandoffNote(e.target.value)}
-                  placeholder="Комментарий (необязательно)"
-                  className="ai-input-sm"
-                />
-                {brief ? (
-                  <details className="ai-brief">
-                    <summary>Что уйдёт менеджеру</summary>
-                    <pre>{brief}</pre>
-                  </details>
-                ) : null}
-                <button type="button" onClick={() => void handoff()} className="ai-btn-primary full">
-                  Отправить заявку
-                </button>
-              </div>
-            ) : (
-              <div className="ai-cta-row">
-                <button
-                  type="button"
-                  className="ai-btn-primary"
-                  disabled={!sessionId}
-                  onClick={() => setHandoffOpen(true)}
-                >
-                  {orderPlan?.pack?.saves_rfqs
-                    ? `${orderPlan.pack.rfq_count} заявки · ${orderPlan.pack.groups.map((g) => g.supplier_name).join(' + ')}`
-                    : orderPlan?.recommended?.kind === 'full_cover'
-                      ? `Одна заявка · ${orderPlan.recommended.supplier_name}`
-                      : 'Передать менеджеру'}
-                </button>
-                <button
-                  type="button"
-                  className="ai-btn-ghost"
-                  disabled={loading || offers.length < 2}
-                  onClick={() => void send('Сравни топ-3')}
-                >
-                  Сравнить топ-3
-                </button>
-                <button
-                  type="button"
-                  className="ai-btn-ghost"
-                  disabled={loading || offers.length < 2}
-                  onClick={() => void send('Покажи дешевле')}
-                >
-                  Дешевле
-                </button>
-              </div>
-            )}
+            <div className="ai-cta-row">
+              <button
+                type="button"
+                className="ai-btn-ghost"
+                disabled={loading || offers.length < 2}
+                onClick={() => void send('Сравни топ-3')}
+              >
+                Сравнить топ-3
+              </button>
+              <button
+                type="button"
+                className="ai-btn-ghost"
+                disabled={loading || offers.length < 2}
+                onClick={() => void send('Покажи дешевле')}
+              >
+                Дешевле
+              </button>
+            </div>
           </div>
         </section>
       </div>

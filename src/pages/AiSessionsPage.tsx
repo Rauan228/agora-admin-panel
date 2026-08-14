@@ -7,8 +7,6 @@ type Row = {
   status: string
   created_at: string | null
   updated_at: string | null
-  handed_off_at: string | null
-  handoff_contact: string | null
   messages_count: number
   tokens_in: number
   tokens_out: number
@@ -74,14 +72,14 @@ export function AiSessionsPage() {
       {err ? <div className="dash-banner dash-banner-err">{err}</div> : null}
 
       <div className="dash-period" style={{ marginBottom: '0.75rem' }}>
-        {['', 'active', 'handed_off', 'closed'].map((s) => (
+        {['', 'active', 'closed'].map((s) => (
           <button
             key={s || 'all'}
             type="button"
             className={status === s ? 'is-on' : ''}
             onClick={() => setStatus(s)}
           >
-            {s === '' ? 'все' : s === 'handed_off' ? 'handoff' : s}
+            {s === '' ? 'все' : s}
           </button>
         ))}
       </div>
