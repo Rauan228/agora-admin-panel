@@ -30,6 +30,9 @@ export function Layout() {
               <NavLink to="/ai" className={linkClass}>
                 ИИ-подбор
               </NavLink>
+              <NavLink to="/ai/sessions" className={linkClass}>
+                Чаты
+              </NavLink>
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm">

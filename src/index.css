@@ -30,6 +30,11 @@ a {
   text-decoration: none;
 }
 
+.sess-link { color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; }
+.sess-link:hover { color: #1e3a8a; }
+.sess-thread { display: flex; flex-direction: column; gap: 0.65rem; max-width: 46rem; }
+.sess-time { font-weight: 400; color: #94a3b8; font-size: 0.7rem; }
+
 /* Utility subset used by admin pages (no Tailwind build needed) */
 .min-h-screen { min-height: 100vh; }
 .mx-auto { margin-left: auto; margin-right: auto; }

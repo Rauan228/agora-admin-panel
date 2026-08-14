@@ -146,6 +146,7 @@ type Bundle = {
 type OrderPack = {
   rfq_count: number
   kind?: string
+  saves_rfqs?: boolean
   all_solid?: boolean
   label?: string | null
   reason?: string | null
@@ -1010,7 +1011,7 @@ export function AiMatchPage() {
               </div>
             ) : null}
 
-            {orderPlan?.multi && (orderPlan.pack?.rfq_count ?? 0) >= 2 ? (
+            {orderPlan?.multi && orderPlan.pack?.saves_rfqs ? (
               <article className="ai-bundle ai-bundle-pack">
                 <div className="ai-bundle-head">
                   <span className="ai-bundle-badge ai-bundle-badge-pack">
@@ -1327,8 +1328,8 @@ export function AiMatchPage() {
                   disabled={!sessionId}
                   onClick={() => setHandoffOpen(true)}
                 >
-                  {(orderPlan?.pack?.rfq_count ?? 0) >= 2
-                    ? `${orderPlan!.pack!.rfq_count} заявки · ${orderPlan!.pack!.groups.map((g) => g.supplier_name).join(' + ')}`
+                  {orderPlan?.pack?.saves_rfqs
+                    ? `${orderPlan.pack.rfq_count} заявки · ${orderPlan.pack.groups.map((g) => g.supplier_name).join(' + ')}`
                     : orderPlan?.recommended?.kind === 'full_cover'
                       ? `Одна заявка · ${orderPlan.recommended.supplier_name}`
                       : 'Передать менеджеру'}

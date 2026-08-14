@@ -3,6 +3,8 @@ import { AuthProvider } from './auth/AuthContext'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AiMatchPage } from './pages/AiMatchPage'
+import { AiSessionReadPage } from './pages/AiSessionReadPage'
+import { AiSessionsPage } from './pages/AiSessionsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { OfferFormPage } from './pages/OfferFormPage'
@@ -31,6 +33,8 @@ export default function App() {
             <Route path="/suppliers/new" element={<SupplierFormPage />} />
             <Route path="/suppliers/:id" element={<SupplierFormPage />} />
             <Route path="/ai" element={<AiMatchPage />} />
+            <Route path="/ai/sessions" element={<AiSessionsPage />} />
+            <Route path="/ai/sessions/:id" element={<AiSessionReadPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

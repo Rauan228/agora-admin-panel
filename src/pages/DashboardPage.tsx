@@ -593,7 +593,9 @@ export function DashboardPage() {
                     <span className={`dash-st dash-st-${r.status}`}>{r.status}</span>
                   </td>
                   <td className="dash-clip" title={r.query_preview}>
-                    {r.query_preview}
+                    <Link to={`/ai/sessions/${r.id}`} className="sess-link">
+                      {r.query_preview}
+                    </Link>
                   </td>
                   <td>{r.messages_count}</td>
                   <td>
