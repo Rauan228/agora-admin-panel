@@ -343,7 +343,12 @@ export function AiMatchPage() {
             messages?: { id: number; role: ChatMsg['role']; content: string }[]
             catalog?: CatalogStats
             session_cost?: SessionCost
+            status?: string
           }>(`${AI_BASE}/sessions/${saved}`)
+          if (restored.status === 'closed') {
+            window.localStorage.removeItem(SESSION_KEY)
+            throw new Error('closed')
+          }
           setSessionId(restored.session_id)
           applyResults(restored)
           if (restored.catalog) setCatalog(restored.catalog)
