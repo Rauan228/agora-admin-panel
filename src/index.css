@@ -525,6 +525,107 @@ button:hover { cursor: pointer; }
 .ai-tag-value { color: var(--ai-ink); font-weight: 550; }
 .ai-understood-hint { margin-top: 0.45rem; font-size: 0.7rem; color: #64748b; }
 
+/* wholesale kit / one-RFQ bundle */
+.ai-bundle {
+  border: 1px solid #bbf7d0;
+  background: linear-gradient(180deg, #f0fdf4 0%, #fff 72%);
+  border-radius: 0.85rem;
+  padding: 0.85rem 0.9rem 0.8rem;
+  box-shadow: 0 1px 0 rgba(22, 163, 74, 0.08);
+}
+.ai-bundle-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.ai-bundle-badge {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #14532d;
+  background: #bbf7d0;
+  border-radius: 999px;
+  padding: 0.22rem 0.5rem;
+}
+.ai-bundle-titleblock { flex: 1; min-width: 0; }
+.ai-bundle-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #14532d;
+  line-height: 1.25;
+}
+.ai-bundle-sub { margin: 0.15rem 0 0; font-size: 0.75rem; color: #3f6212; }
+.ai-bundle-score {
+  text-align: right;
+  flex-shrink: 0;
+}
+.ai-bundle-score em {
+  display: block;
+  font-style: normal;
+  font-size: 1.15rem;
+  font-weight: 750;
+  color: #166534;
+  line-height: 1;
+}
+.ai-bundle-score span { font-size: 0.62rem; color: #65a30d; }
+.ai-bundle-reason {
+  margin: 0.55rem 0 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #3f6212;
+}
+.ai-bundle-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.ai-bundle-line {
+  display: grid;
+  grid-template-columns: 7.2rem 1fr auto;
+  gap: 0.45rem 0.65rem;
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid #dcfce7;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.6rem;
+}
+.ai-bundle-line.is-gap { border-color: #fecaca; background: #fff7f7; }
+.ai-bundle-line-cat {
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #166534;
+}
+.ai-bundle-line-title {
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: var(--ai-ink);
+  min-width: 0;
+}
+.ai-bundle-line-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.ai-bundle-split {
+  margin: 0.55rem 0 0;
+  font-size: 0.7rem;
+  color: #65a30d;
+}
+@media (max-width: 720px) {
+  .ai-bundle-line { grid-template-columns: 1fr; }
+}
+
+.ai-card-kit {
+  border-color: #86efac;
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.12);
+}
+
 /* offer card */
 .ai-card {
   border: 1px solid var(--ai-border);

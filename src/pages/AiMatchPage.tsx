@@ -26,6 +26,8 @@ type MatchedOffer = {
   match_tier?: MatchTier
   match_reasons?: string[]
   match_gaps?: string[]
+  line_slug?: string
+  in_recommended_bundle?: boolean
   photo_url?: string | null
   supplier?: { id: number; commercial_name: string; logo_url?: string | null }
   category?: { id: number; slug: string; name: string }
@@ -118,6 +120,42 @@ type SessionCost = {
   messages_with_llm?: number
 }
 
+type BundleLine = {
+  slug: string
+  name: string
+  covered: boolean
+  offer: MatchedOffer | null
+}
+
+type Bundle = {
+  kind: 'full_cover' | 'partial' | string
+  supplier_id: number
+  supplier_name: string
+  logo_url?: string | null
+  covers: number
+  needed: number
+  coverage_pct: number
+  min_score: number
+  avg_score: number
+  weak_line?: boolean
+  label: string
+  reason: string
+  lines: BundleLine[]
+}
+
+type OrderPlan = {
+  multi: boolean
+  needed?: number
+  full_cover_count?: number
+  recommended?: Bundle | null
+  bundles?: Bundle[]
+  split?: {
+    supplier_count: number
+    extra_rfqs: number
+    lines: { slug: string; name: string; supplier_name?: string | null; score?: number | null }[]
+  } | null
+}
+
 type SessionCreate = {
   session_id: string
   welcome: string
@@ -143,6 +181,7 @@ type MessageResponse = {
   /** Admin-only — never on public storefront API */
   cost?: TurnCost
   session_cost?: SessionCost
+  order_plan?: OrderPlan
 }
 
 const AI_BASE = '/admin/ai'
@@ -152,6 +191,7 @@ const SCENARIOS = [
   { label: 'Короба для e-com', text: 'Нужны гофрокороба для отправок на маркетплейсы, Москва' },
   { label: 'Самосбор 400×300×200', text: 'Самосборные короба 400×300×200 мм, бурые, 5000 шт/мес, Москва' },
   { label: 'Гофролист оптом', text: 'Гофролист Т-23 оптом, Москва' },
+  { label: 'Короб и лист', text: 'Мне нужен гофрокороб и гофролист, Москва' },
   { label: 'Срочно 1000 шт', text: 'Срочно нужно 1000 коробок в Москву, за 5 дней' },
   { label: 'С печатью логотипа', text: 'Короба с печатью логотипа в 1 цвет, 3000 шт' },
 ]
@@ -224,6 +264,7 @@ export function AiMatchPage() {
   const [offers, setOffers] = useState<MatchedOffer[]>([])
   const [comparison, setComparison] = useState<ComparisonRow[]>([])
   const [understood, setUnderstood] = useState<Understood[]>([])
+  const [orderPlan, setOrderPlan] = useState<OrderPlan | null>(null)
   const [query, setQuery] = useState<Record<string, unknown> | null>(null)
   const [matchStats, setMatchStats] = useState<MatchStats | null>(null)
   const [catalog, setCatalog] = useState<CatalogStats | null>(null)
@@ -266,6 +307,7 @@ export function AiMatchPage() {
     setOffers([])
     setComparison([])
     setUnderstood([])
+    setOrderPlan(null)
     setQuery(null)
     setMatchStats(null)
     setBrief(null)
@@ -322,6 +364,7 @@ export function AiMatchPage() {
     turn?: TurnInfo
     cost?: TurnCost
     session_cost?: SessionCost
+    order_plan?: OrderPlan
   }) {
     // A conversational turn (greeting, meta question) ran no search — keep the
     // shortlist on screen instead of blanking the panel.
@@ -333,10 +376,12 @@ export function AiMatchPage() {
     if (searched || isReset) {
       if (res.offers) setOffers(res.offers)
       if (res.comparison?.rows) setComparison(res.comparison.rows)
+      if (res.order_plan !== undefined) setOrderPlan(res.order_plan)
       if (isReset) {
         setOffers([])
         setComparison([])
         setCompareIds([])
+        setOrderPlan(null)
       }
     }
     if (res.structured_query) setQuery(res.structured_query)
@@ -862,7 +907,9 @@ export function AiMatchPage() {
         <section className="ai-panel ai-panel-results">
           <div className="ai-panel-head">
             <span>
-              Подборка{offers.length > 0 ? ` · ${offers.length}` : ''}
+              {orderPlan?.multi
+                ? `Комплект · ${orderPlan.needed ?? 0} позиции`
+                : `Подборка${offers.length > 0 ? ` · ${offers.length}` : ''}`}
             </span>
             {matchStats?.sorted_by ? (
               <span className="ai-panel-note">
@@ -920,6 +967,55 @@ export function AiMatchPage() {
               </div>
             ) : null}
 
+            {orderPlan?.multi && orderPlan.recommended?.kind === 'full_cover' ? (
+              <article className="ai-bundle">
+                <div className="ai-bundle-head">
+                  <span className="ai-bundle-badge">Одна заявка</span>
+                  <div className="ai-bundle-titleblock">
+                    <h3 className="ai-bundle-title">{orderPlan.recommended.supplier_name}</h3>
+                    <p className="ai-bundle-sub">
+                      закрывает {orderPlan.recommended.covers} из {orderPlan.recommended.needed} позиций
+                      {orderPlan.recommended.weak_line ? ' · есть слабое совпадение' : ''}
+                    </p>
+                  </div>
+                  <div className="ai-bundle-score">
+                    <em>{orderPlan.recommended.min_score}%</em>
+                    <span>мин. по линиям</span>
+                  </div>
+                </div>
+                <p className="ai-bundle-reason">{orderPlan.recommended.reason}</p>
+                <div className="ai-bundle-lines">
+                  {orderPlan.recommended.lines.map((line) => (
+                    <div key={line.slug} className={`ai-bundle-line${line.covered ? '' : ' is-gap'}`}>
+                      <div className="ai-bundle-line-cat">{line.name}</div>
+                      {line.offer ? (
+                        <>
+                          <div className="ai-bundle-line-title">{line.offer.offer_title}</div>
+                          <div className="ai-bundle-line-meta">
+                            {formatPrice(line.offer)} · {line.offer.match_score}%
+                          </div>
+                        </>
+                      ) : (
+                        <div className="ai-bundle-line-title">нет оффера у этого поставщика</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {orderPlan.split && orderPlan.split.extra_rfqs > 0 ? (
+                  <p className="ai-bundle-split">
+                    Если брать лучших по каждой позиции по отдельности — {orderPlan.split.supplier_count}{' '}
+                    поставщика, +{orderPlan.split.extra_rfqs} заявка.
+                  </p>
+                ) : (
+                  <p className="ai-bundle-split">Лучшие по каждой линии уже у этого поставщика.</p>
+                )}
+              </article>
+            ) : orderPlan?.multi ? (
+              <div className="ai-banner ai-banner-warn compact">
+                Одним поставщиком комплект не закрывается — позиции придётся разнести по заявкам.
+              </div>
+            ) : null}
+
             {relaxed === 'category' ? (
               <div className="ai-banner ai-banner-info compact">
                 В запрошенной категории совпадений не было — расширил поиск на весь каталог.
@@ -956,8 +1052,12 @@ export function AiMatchPage() {
               const tier = TIER_META[o.match_tier ?? 'unknown']
               const lead = leadLabel(o)
               const selected = compareIds.includes(o.id)
+              const inKit = o.in_recommended_bundle === true
               return (
-                <article key={o.id} className={`ai-card${selected ? ' ai-card-selected' : ''}`}>
+                <article
+                  key={o.id}
+                  className={`ai-card${selected ? ' ai-card-selected' : ''}${inKit ? ' ai-card-kit' : ''}`}
+                >
                   <div className="ai-card-top">
                     <div className="ai-thumb">
                       {o.photo_url ? (
@@ -980,6 +1080,7 @@ export function AiMatchPage() {
                         {o.supplier?.commercial_name || 'Поставщик'}
                         {o.category ? ` · ${o.category.name}` : ''}
                         {o.sku ? ` · ${o.sku}` : ''}
+                        {inKit ? ' · в комплекте' : ''}
                       </p>
 
                       <p className="ai-card-terms">
@@ -1140,7 +1241,9 @@ export function AiMatchPage() {
                   disabled={!sessionId}
                   onClick={() => setHandoffOpen(true)}
                 >
-                  Передать менеджеру
+                  {orderPlan?.recommended?.kind === 'full_cover'
+                    ? `Одна заявка · ${orderPlan.recommended.supplier_name}`
+                    : 'Передать менеджеру'}
                 </button>
                 <button
                   type="button"
